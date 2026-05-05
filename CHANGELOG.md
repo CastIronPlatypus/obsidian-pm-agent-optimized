@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- "Open as note" button in the task modal header opens the task's underlying note in a new tab — useful when the modal is too small to read the full description
 - Paste a screenshot or drag any file onto the task modal description to save it under the vault's attachments folder and embed it as `![[...]]` at the cursor
 - Search box, filters (status, priority, assignee, tag, due date, archived), and saved views now appear above every view, not just the table
 - Filter state persists per project across plugin reloads
