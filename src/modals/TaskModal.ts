@@ -1,4 +1,4 @@
-import { App, ButtonComponent, Component, Modal, MarkdownRenderer, Notice } from 'obsidian'
+import { App, ButtonComponent, Component, ExtraButtonComponent, Modal, MarkdownRenderer, Notice } from 'obsidian'
 import type PMPlugin from '../main'
 import { Project, Task, makeTask } from '../types'
 import { flattenTasks } from '../store/TaskTreeOps'
@@ -128,6 +128,19 @@ export class TaskModal extends Modal {
     })
     titleInput.focus()
     titleInput.select()
+
+    if (!this.isNew && this.task.filePath) {
+      const filePath = this.task.filePath
+      new ExtraButtonComponent(header)
+        .setIcon('file-text')
+        .setTooltip('Open as note')
+        .onClick(() => {
+          this.saved = false
+          this.cancelled = false
+          this.close()
+          void this.app.workspace.openLinkText(filePath, '', true)
+        })
+    }
 
     // ── Description (preview / edit) ─────────────────────────────────────────
     const descSection = contentEl.createDiv('pm-modal-section pm-modal-desc-section')
