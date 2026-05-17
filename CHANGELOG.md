@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Setting "Save tasks on close" (default on) — turn off to make closing the task modal via X or click-outside discard edits, so only the Save button persists changes ([#62](https://github.com/StepanKropachev/obsidian-pm/issues/62))
 - "Open as note" button in the task modal header opens the task's underlying note in a new tab — useful when the modal is too small to read the full description
 - Paste a screenshot or drag any file onto the task modal description to save it under the vault's attachments folder and embed it as `![[...]]` at the cursor
 - Search box, filters (status, priority, assignee, tag, due date, archived), and saved views now appear above every view, not just the table
