@@ -124,6 +124,7 @@ export interface PMSettings {
   notificationLeadDays: number
   autoSchedule: boolean
   kanbanShowSubtasks: boolean
+  kanbanShowDescriptionPreview: boolean
   saveTaskOnClose: boolean
   projectFilters: Record<string, PerProjectFilter>
   /** Collapsed task ids per project file path. UI state — lives here so toggles don't rewrite task files. */
@@ -157,6 +158,7 @@ export const DEFAULT_SETTINGS: PMSettings = {
   priorities: DEFAULT_PRIORITIES,
   globalTeamMembers: [],
   kanbanShowSubtasks: false,
+  kanbanShowDescriptionPreview: false,
   notificationsEnabled: true,
   notificationLeadDays: 2,
   autoSchedule: true,

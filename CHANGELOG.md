@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Setting "Show description preview on board" (default off) shows the first few lines of each task description on kanban cards, with markdown stripped and clamped to three lines ([#59](https://github.com/StepanKropachev/obsidian-pm/issues/59))
+
 ### Changed
 
 - Saving a task rewrites only the files affected by the change instead of every task file in the project
