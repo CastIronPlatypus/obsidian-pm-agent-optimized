@@ -1,10 +1,37 @@
-import { App, PluginSettingTab, Setting, Notice } from 'obsidian'
+import { AbstractInputSuggest, App, PluginSettingTab, Setting, Notice, getIconIds, setIcon } from 'obsidian'
 import type PMPlugin from './main'
 import { PMSettings, DEFAULT_SETTINGS, makeId } from './types'
 import { flattenTasks } from './store/TaskTreeOps'
 
 export type { PMSettings }
 export { DEFAULT_SETTINGS }
+
+/** Suggests Lucide icon ids for the status/priority icon inputs. Typed emoji are kept as-is. */
+class IconSuggest extends AbstractInputSuggest<string> {
+  protected getSuggestions(query: string): string[] {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    return getIconIds()
+      .filter((id) => id.includes(q))
+      .slice(0, 24)
+  }
+
+  renderSuggestion(id: string, el: HTMLElement): void {
+    el.addClass('pm-icon-suggestion')
+    setIcon(el.createSpan({ cls: 'pm-icon-suggestion-glyph' }), id)
+    el.createSpan({ text: id })
+  }
+}
+
+/** Wire icon-name suggestions to an icon input; picking a suggestion saves through the input's change handler. */
+function attachIconSuggest(app: App, input: HTMLInputElement): void {
+  const suggest = new IconSuggest(app, input)
+  suggest.onSelect((id) => {
+    suggest.setValue(id)
+    input.dispatchEvent(new Event('change'))
+    suggest.close()
+  })
+}
 
 export class PMSettingTab extends PluginSettingTab {
   plugin: PMPlugin
@@ -207,6 +234,33 @@ export class PMSettingTab extends PluginSettingTab {
           this.renderStatusList(statusContainer)
         })
     )
+
+    // ── Priorities ────────────────────────────────────────────────────────────
+    new Setting(containerEl).setName('Priorities').setHeading()
+    containerEl.createEl('p', {
+      cls: 'pm-settings-desc',
+      text: 'Customize priority labels, colors, and icons. Drag to reorder from most to least important.'
+    })
+
+    const priorityContainer = containerEl.createDiv('pm-settings-statuses')
+    this.renderPriorityList(priorityContainer)
+
+    new Setting(containerEl).addButton((btn) =>
+      btn
+        .setButtonText('+ add priority')
+        .setCta()
+        .onClick(() => {
+          const id = 'priority-' + makeId().slice(0, 6)
+          this.plugin.settings.priorities.push({
+            id,
+            label: 'New priority',
+            color: '#8a94a0',
+            icon: ''
+          })
+          void this.plugin.saveSettings()
+          this.renderPriorityList(priorityContainer)
+        })
+    )
   }
 
   private renderMembersList(container: HTMLElement): void {
@@ -230,27 +284,50 @@ export class PMSettingTab extends PluginSettingTab {
     })
   }
 
-  private async remapOrphanTasks(deletedId: string, deletedLabel: string): Promise<void> {
-    const statuses = this.plugin.settings.statuses
-    if (statuses.length === 0) return
-    const defaultStatus = statuses[0]
+  private async remapOrphanTasks(field: 'status' | 'priority', deletedId: string, deletedLabel: string): Promise<void> {
+    const configs = field === 'status' ? this.plugin.settings.statuses : this.plugin.settings.priorities
+    if (configs.length === 0) return
+    const fallback = configs[0]
     const folder = this.plugin.settings.projectsFolder
     const projects = await this.plugin.store.loadAllProjects(folder)
     let remapped = 0
     for (const project of projects) {
       const ids = flattenTasks(project.tasks)
-        .filter(({ task }) => task.status === deletedId)
+        .filter(({ task }) => task[field] === deletedId)
         .map(({ task }) => task.id)
       if (ids.length) {
-        await this.plugin.store.updateTasks(project, ids, { status: defaultStatus.id })
+        await this.plugin.store.updateTasks(project, ids, { [field]: fallback.id })
         remapped += ids.length
       }
     }
     if (remapped > 0) {
-      new Notice(
-        `Remapped ${remapped} task${remapped === 1 ? '' : 's'} from '${deletedLabel}' to '${defaultStatus.label}'.`
-      )
+      new Notice(`Remapped ${remapped} task${remapped === 1 ? '' : 's'} from '${deletedLabel}' to '${fallback.label}'.`)
     }
+  }
+
+  /** Wire drag-to-reorder on a config row; on drop, moves the dragged item to this row's index. */
+  private wireRowDragReorder<T>(row: HTMLElement, index: number, items: T[], rerender: () => void): void {
+    row.createSpan({ text: '⠿', cls: 'pm-settings-drag-handle' })
+    row.draggable = true
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer?.setData('text/plain', String(index))
+      row.addClass('pm-settings-row--dragging')
+    })
+    row.addEventListener('dragend', () => {
+      row.removeClass('pm-settings-row--dragging')
+    })
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault()
+    })
+    row.addEventListener('drop', (e) => {
+      e.preventDefault()
+      const fromIdx = parseInt(e.dataTransfer?.getData('text/plain') ?? '', 10)
+      if (isNaN(fromIdx) || fromIdx === index) return
+      const [moved] = items.splice(fromIdx, 1)
+      items.splice(index, 0, moved)
+      void this.plugin.saveSettings()
+      rerender()
+    })
   }
 
   private renderStatusList(container: HTMLElement): void {
@@ -258,34 +335,13 @@ export class PMSettingTab extends PluginSettingTab {
     this.plugin.settings.statuses.forEach((s, i) => {
       const row = container.createDiv('pm-settings-status-row')
 
-      // Drag handle
-      row.createSpan({ text: '⠿', cls: 'pm-settings-drag-handle' })
-      row.draggable = true
-      row.addEventListener('dragstart', (e) => {
-        e.dataTransfer?.setData('text/plain', String(i))
-        row.addClass('pm-settings-row--dragging')
-      })
-      row.addEventListener('dragend', () => {
-        row.removeClass('pm-settings-row--dragging')
-      })
-      row.addEventListener('dragover', (e) => {
-        e.preventDefault()
-      })
-      row.addEventListener('drop', (e) => {
-        e.preventDefault()
-        const fromIdx = parseInt(e.dataTransfer?.getData('text/plain') ?? '', 10)
-        if (isNaN(fromIdx) || fromIdx === i) return
-        const statuses = this.plugin.settings.statuses
-        const [moved] = statuses.splice(fromIdx, 1)
-        statuses.splice(i, 0, moved)
-        void this.plugin.saveSettings()
-        this.renderStatusList(container)
-      })
+      this.wireRowDragReorder(row, i, this.plugin.settings.statuses, () => this.renderStatusList(container))
 
-      // Icon input
+      // Icon input: emoji or a Lucide icon id (with suggestions)
       const icon = row.createEl('input', { type: 'text', value: s.icon })
       icon.addClass('pm-settings-status-icon')
       icon.placeholder = ''
+      attachIconSuggest(this.app, icon)
       icon.addEventListener('change', () => {
         this.plugin.settings.statuses[i].icon = icon.value
         void this.plugin.saveSettings()
@@ -327,7 +383,55 @@ export class PMSettingTab extends PluginSettingTab {
         this.plugin.settings.statuses.splice(i, 1)
         void this.plugin.saveSettings()
         this.renderStatusList(container)
-        void this.remapOrphanTasks(deletedStatus.id, deletedStatus.label)
+        void this.remapOrphanTasks('status', deletedStatus.id, deletedStatus.label)
+      })
+    })
+  }
+
+  private renderPriorityList(container: HTMLElement): void {
+    container.empty()
+    this.plugin.settings.priorities.forEach((p, i) => {
+      const row = container.createDiv('pm-settings-status-row')
+
+      this.wireRowDragReorder(row, i, this.plugin.settings.priorities, () => this.renderPriorityList(container))
+
+      // Icon input: emoji or a Lucide icon id (with suggestions)
+      const icon = row.createEl('input', { type: 'text', value: p.icon })
+      icon.addClass('pm-settings-status-icon')
+      icon.placeholder = ''
+      attachIconSuggest(this.app, icon)
+      icon.addEventListener('change', () => {
+        this.plugin.settings.priorities[i].icon = icon.value
+        void this.plugin.saveSettings()
+      })
+
+      // Label input
+      const label = row.createEl('input', { type: 'text', value: p.label })
+      label.addClass('pm-settings-status-label')
+      label.addEventListener('change', () => {
+        this.plugin.settings.priorities[i].label = label.value
+        void this.plugin.saveSettings()
+      })
+
+      // Color picker
+      const color = row.createEl('input', { type: 'color', value: p.color })
+      color.addEventListener('change', () => {
+        this.plugin.settings.priorities[i].color = color.value
+        void this.plugin.saveSettings()
+      })
+
+      // Delete button
+      const del = row.createEl('button', { text: '✕', cls: 'pm-settings-del' })
+      del.addEventListener('click', () => {
+        if (this.plugin.settings.priorities.length <= 1) {
+          new Notice('You must have at least one priority.')
+          return
+        }
+        const deletedPriority = this.plugin.settings.priorities[i]
+        this.plugin.settings.priorities.splice(i, 1)
+        void this.plugin.saveSettings()
+        this.renderPriorityList(container)
+        void this.remapOrphanTasks('priority', deletedPriority.id, deletedPriority.label)
       })
     })
   }
