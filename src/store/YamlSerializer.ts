@@ -96,6 +96,14 @@ export function buildTaskFrontmatter(task: Task, project: Project, parentTask: T
   if (task.timeEstimate !== undefined) fm.timeEstimate = task.timeEstimate
   if (task.timeLogs?.length) fm.timeLogs = task.timeLogs
   if (Object.keys(task.customFields).length) fm.customFields = task.customFields
+  // Another plugin's keys, carried through untouched. Written last, and never
+  // over a field we own — a foreign `recurrence` only lands when we have none.
+  if (task.foreign) {
+    for (const [key, value] of Object.entries(task.foreign)) {
+      if (key in fm) continue
+      fm[key] = value
+    }
+  }
   return fm
 }
 

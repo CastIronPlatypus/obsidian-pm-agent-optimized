@@ -3,6 +3,41 @@ import { parseYaml } from 'obsidian'
 export const FRONTMATTER_KEY = 'pm-project'
 export const TASK_FRONTMATTER_KEY = 'pm-task'
 
+/**
+ * Frontmatter keys a task file's typed model round-trips on its own. Everything
+ * else in the frontmatter belongs to another plugin (TaskNotes writes `blockedBy`,
+ * `timeEntries`, `contexts`, …) or to the user, and is carried through untouched
+ * on `Task.foreign` so a PM edit never destroys it.
+ */
+export const TASK_OWNED_KEYS: ReadonlySet<string> = new Set([
+  TASK_FRONTMATTER_KEY,
+  'projectId',
+  'parentId',
+  'id',
+  'title',
+  'description',
+  'type',
+  'status',
+  'priority',
+  'start',
+  'due',
+  'progress',
+  'completed',
+  'assignees',
+  'tags',
+  'subtasks',
+  'subtaskIds',
+  'dependencies',
+  'recurrence',
+  'timeEstimate',
+  'timeLogs',
+  'customFields',
+  'collapsed',
+  'archived',
+  'createdAt',
+  'updatedAt'
+])
+
 // ─── Parse ──────────────────────────────────────────────────────────────────
 
 export function parseFrontmatter(content: string): {
@@ -45,10 +80,14 @@ export function appendYaml(lines: string[], obj: Record<string, unknown>, indent
     } else if (typeof val === 'string') {
       const escaped = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
       lines.push(`${pad}${key}: "${escaped}"`)
+    } else if (val instanceof Date) {
+      // Unquoted YAML timestamps parse to Date. Round-trip them as ISO strings
+      // rather than falling through to the object branch, which would emit `{}`.
+      lines.push(`${pad}${key}: ${val.toISOString()}`)
     } else if (Array.isArray(val)) {
       if (val.length === 0) {
         lines.push(`${pad}${key}: []`)
-      } else if (typeof val[0] === 'object') {
+      } else if (val[0] !== null && typeof val[0] === 'object') {
         lines.push(`${pad}${key}:`)
         for (const item of val) {
           const entries = Object.entries(item as Record<string, unknown>)

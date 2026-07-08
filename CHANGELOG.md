@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The import dialog offered the built-in statuses and priorities instead of the configured ones
+- Editing a task no longer discards frontmatter written by other plugins (such as TaskNotes) — unknown properties are now preserved when a task file is saved
 
 ## [1.8.0] - 2026-07-03
 

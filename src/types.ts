@@ -48,6 +48,11 @@ export interface Task {
   timeEstimate?: number // hours
   timeLogs?: TimeLog[]
   customFields: Record<string, unknown>
+  /**
+   * Frontmatter keys written by another plugin (TaskNotes) or by the user, kept
+   * verbatim so our writes don't destroy them. Never read by our own code.
+   */
+  foreign?: Record<string, unknown>
   /** UI state, persisted per project in plugin settings (data.json), not in frontmatter. */
   collapsed: boolean
   createdAt: string

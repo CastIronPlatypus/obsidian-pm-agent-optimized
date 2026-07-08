@@ -105,4 +105,19 @@ describe('appendYaml', () => {
     appendYaml(lines, { outer: { inner: 'x' } }, 0)
     expect(lines).toEqual(['outer:', '  inner: "x"'])
   })
+
+  it('serializes Date values as ISO strings, not empty objects', () => {
+    // Obsidian's parseYaml coerces unquoted YAML timestamps (as real TaskNotes
+    // files write dates) into Date objects. Without special handling these would
+    // fall through to the object branch and serialize as `{}`, dropping the value.
+    const lines: string[] = []
+    appendYaml(lines, { when: new Date('2026-07-08T15:04:19.713Z') }, 0)
+    expect(lines).toEqual(['when: 2026-07-08T15:04:19.713Z'])
+  })
+
+  it('handles null entries inside arrays without crashing', () => {
+    const lines: string[] = []
+    appendYaml(lines, { list: [null, 'a'] }, 0)
+    expect(lines).toEqual(['list: [null, "a"]'])
+  })
 })

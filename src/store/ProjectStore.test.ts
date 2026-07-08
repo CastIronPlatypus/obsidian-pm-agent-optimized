@@ -846,6 +846,112 @@ describe('ProjectStore.importNoteAsTask', () => {
   })
 })
 
+// A task file is shared with TaskNotes: it writes keys we don't model. Every
+// write path has to leave them intact, including keys that appeared on disk
+// after we hydrated the task in memory.
+describe('foreign frontmatter survives writes', () => {
+  function fileAt(vault: FakeVault, path: string): TFile {
+    const file = vault.getAbstractFileByPath(path)
+    if (!(file instanceof TFile)) throw new Error(`missing ${path}`)
+    return file
+  }
+
+  /** Splice extra frontmatter keys onto a task file behind the store's back. */
+  async function writeForeignKeys(vault: FakeVault, path: string, yaml: string): Promise<void> {
+    await vault.process(fileAt(vault, path), (content) => content.replace(/^---\n/, `---\n${yaml}\n`))
+  }
+
+  it('preserves foreign keys through a frontmatter-only save', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Interop', 'Projects')
+    const task = await addNamed(store, project, 'Shared')
+    const path = expectDefined(task.filePath)
+    await writeForeignKeys(vault, path, 'timeEntries:\n  - startTime: "09:00"\ncontexts: ["@home"]')
+
+    await store.updateTask(project, task.id, { status: 'in-progress' })
+
+    const content = await vault.cachedRead(fileAt(vault, path))
+    expect(content).toContain('status: "in-progress"')
+    expect(content).toContain('startTime: "09:00"')
+    expect(content).toContain('contexts: ["@home"]')
+  })
+
+  it('preserves foreign keys through a full body rewrite', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Interop', 'Projects')
+    const task = await addNamed(store, project, 'Shared')
+    const path = expectDefined(task.filePath)
+    await writeForeignKeys(vault, path, 'blockedBy:\n  - uid: "other"\n    reltype: "FS"')
+
+    await store.updateTask(project, task.id, { description: 'rewritten body' })
+
+    const content = await vault.cachedRead(fileAt(vault, path))
+    expect(content).toContain('rewritten body')
+    expect(content).toContain('uid: "other"')
+    expect(content).toContain('reltype: "FS"')
+  })
+
+  it('keeps a foreign key written after the task was hydrated', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Interop', 'Projects')
+    const task = await addNamed(store, project, 'Shared')
+    const path = expectDefined(task.filePath)
+
+    // Task is already in memory without the key; TaskNotes adds it now.
+    await writeForeignKeys(vault, path, 'icsEventId: "ics-1"')
+    await store.updateTask(project, task.id, { priority: 'high' })
+
+    const content = await vault.cachedRead(fileAt(vault, path))
+    expect(content).toContain('icsEventId: "ics-1"')
+  })
+
+  it('does not write Obsidian metadataCache position artifacts back into the file', async () => {
+    const { store, vault, app } = newStore()
+    const project = await store.createProject('Cache', 'Projects')
+    const task = await addNamed(store, project, 'Cached')
+    const path = expectDefined(task.filePath)
+
+    const cache = (app as unknown as { metadataCache: { getFileCache: (f: TFile) => unknown } }).metadataCache
+    cache.getFileCache = (f: TFile) =>
+      f.path === path
+        ? {
+            frontmatter: {
+              'pm-task': true,
+              id: task.id,
+              title: 'Cached',
+              projectId: project.id,
+              position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 8, col: 3, offset: 90 } }
+            }
+          }
+        : null
+
+    const store2 = new ProjectStore(app, () => SETTINGS)
+    const projectFile = fileAt(vault, project.filePath)
+    const reloaded = expectDefined(await store2.loadProject(projectFile))
+    expect(reloaded.tasks[0].foreign).toBeUndefined()
+
+    await store2.updateTask(reloaded, task.id, { status: 'done' })
+    const content = await vault.cachedRead(fileAt(vault, path))
+    expect(content).not.toContain('position')
+  })
+
+  it('keeps the frontmatter of an imported TaskNotes note', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Import', 'Projects')
+    const note = await vault.create(
+      'Notes/Ticket.md',
+      '---\ntitle: "Ticket"\ntags: ["task"]\ntimeEntries:\n  - startTime: "09:00"\n---\n\nbody text'
+    )
+
+    await store.importNoteAsTask(project, note, { status: 'todo', priority: 'medium', handling: 'move' })
+
+    const created = fileAt(vault, 'Projects/Import_tasks/ticket.md')
+    const content = await vault.read(created)
+    expect(content).toContain('pm-task: true')
+    expect(content).toContain('startTime: "09:00"')
+  })
+})
+
 describe('per-project config', () => {
   it('round-trips the config overrides through the project file', async () => {
     const { store, vault, app } = newStore()

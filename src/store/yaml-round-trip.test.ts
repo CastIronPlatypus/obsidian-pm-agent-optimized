@@ -134,6 +134,129 @@ describe('task round-trip', () => {
   })
 })
 
+// TaskNotes (and any other plugin) writes its own frontmatter keys into the
+// same task file. Reading, editing, and writing a task back must not destroy
+// them — that guarantee is what lets both plugins own one file.
+describe('foreign frontmatter round-trip', () => {
+  const taskNotesKeys: Record<string, unknown> = {
+    recurrence: 'FREQ=WEEKLY;BYDAY=MO',
+    timeEntries: [
+      { startTime: '2026-06-01T09:00:00Z', endTime: '2026-06-01T10:30:00Z' },
+      { startTime: '2026-06-02T14:00:00Z', endTime: '2026-06-02T15:00:00Z' }
+    ],
+    blockedBy: [{ uid: 'other-task', reltype: 'FS', gap: 'P0D' }],
+    customProperties: { foo: 'bar' },
+    reminders: [],
+    icsEventId: 'ics-123',
+    contexts: ['@home', '@errand']
+  }
+
+  it('preserves foreign keys when a pm task is read, edited, and written back', () => {
+    const fm: Record<string, unknown> = {
+      'pm-task': true,
+      id: 'task-fk',
+      title: 'Shared task',
+      status: 'todo',
+      priority: 'medium',
+      ...taskNotesKeys
+    }
+
+    const { task } = hydrateTaskFromFile(fm, '', 'Projects/Test_tasks/shared.md')
+    task.title = 'Renamed by us'
+    task.status = 'in-progress'
+
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    if (!frontmatter) throw new Error('frontmatter missing')
+
+    expect(frontmatter.title).toBe('Renamed by us')
+    expect(frontmatter.status).toBe('in-progress')
+    for (const [key, value] of Object.entries(taskNotesKeys)) {
+      expect(frontmatter[key]).toEqual(value)
+    }
+  })
+
+  it('preserves foreign keys on a TaskNotes-shaped file with no pm-task marker', () => {
+    const fm: Record<string, unknown> = {
+      title: 'TaskNotes inbox item',
+      status: 'open',
+      priority: 'normal',
+      due: '2026-06-30',
+      tags: ['task'],
+      dateCreated: '2026-06-01T08:00:00Z',
+      dateModified: '2026-06-01T08:00:00Z',
+      ...taskNotesKeys
+    }
+
+    const { task } = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/inbox.md')
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    if (!frontmatter) throw new Error('frontmatter missing')
+
+    // Our own fields pass through untranslated — status/priority alignment is a later phase.
+    expect(frontmatter.status).toBe('open')
+    expect(frontmatter.priority).toBe('normal')
+    expect(frontmatter.due).toBe('2026-06-30')
+    expect(frontmatter.tags).toEqual(['task'])
+    expect(frontmatter.dateCreated).toBe('2026-06-01T08:00:00Z')
+    for (const [key, value] of Object.entries(taskNotesKeys)) {
+      expect(frontmatter[key]).toEqual(value)
+    }
+  })
+
+  it('keeps a string recurrence foreign rather than coercing it into our object shape', () => {
+    const { task } = hydrateTaskFromFile({ id: 't-rec', recurrence: 'FREQ=DAILY' }, '', 'Projects/Test_tasks/rec.md')
+    expect(task.recurrence).toBeUndefined()
+
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.recurrence).toBe('FREQ=DAILY')
+  })
+
+  it('lets our own object recurrence win over the foreign passthrough', () => {
+    const { task } = hydrateTaskFromFile(
+      { id: 't-rec2', recurrence: { interval: 'weekly', every: 2 } },
+      '',
+      'Projects/Test_tasks/rec2.md'
+    )
+    expect(task.recurrence).toEqual({ interval: 'weekly', every: 2 })
+
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.recurrence).toEqual({ interval: 'weekly', every: 2 })
+  })
+
+  it('never lets a foreign key shadow a field we own', () => {
+    const { task } = hydrateTaskFromFile(
+      { id: 't-own', title: 'Mine', progress: 10, ...taskNotesKeys },
+      '',
+      'Projects/Test_tasks/own.md'
+    )
+    task.progress = 90
+
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.progress).toBe(90)
+    expect(frontmatter?.id).toBe('t-own')
+  })
+
+  it('does not alias foreign containers from the source frontmatter', () => {
+    const fm: Record<string, unknown> = {
+      id: 't-alias',
+      blockedBy: [{ uid: 'other', reltype: 'FS' }],
+      customProperties: { foo: 'bar' }
+    }
+    const { task } = hydrateTaskFromFile(fm, '', 'Projects/Test_tasks/alias.md')
+    const foreign = task.foreign
+    if (!foreign) throw new Error('foreign missing')
+
+    expect(foreign.blockedBy).not.toBe(fm.blockedBy)
+    expect(foreign.customProperties).not.toBe(fm.customProperties)
+    ;(foreign.blockedBy as { uid: string }[])[0].uid = 'mutated'
+    expect((fm.blockedBy as { uid: string }[])[0].uid).toBe('other')
+  })
+})
+
 describe('project round-trip', () => {
   it('preserves core project fields', () => {
     const p = makeProject('My Project', 'Projects/MyProject.md')
