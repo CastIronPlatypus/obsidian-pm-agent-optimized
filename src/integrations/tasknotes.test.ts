@@ -1,72 +1,56 @@
+import type { App } from 'obsidian'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SETTINGS, type PMSettings } from '../types'
-import { importTaskNotesPalettes, type TaskNotesApi } from './tasknotes'
+import { isTaskNotesInstalled, resolveTaskNotesRef } from './tasknotes'
 
-function makeApi(): TaskNotesApi {
+function makeApp(opts: { plugin?: object; files?: string[]; links?: Record<string, string> } = {}): App {
+  const files = new Set(opts.files ?? [])
   return {
-    apiVersion: 1,
-    hasCapability: () => true,
-    getTask: () => Promise.resolve(null),
-    getSettingsSnapshot: () => ({}),
-    getStatuses: () => [
-      { id: 'open', value: 'open', label: 'Open', color: '#808080', isCompleted: false, order: 1 },
-      { id: 'none', value: 'none', label: 'None', color: '#cccccc', isCompleted: false, order: 0 },
-      { id: 'in-progress', value: 'in-progress', label: 'In progress', color: '#0066cc', isCompleted: false, order: 2 },
-      { id: 'done', value: 'done', label: 'Finished', color: '#00aa00', isCompleted: true, order: 3 }
-    ],
-    getPriorities: () => [
-      { id: 'low', value: 'low', label: 'Low', color: '#00aa00', weight: 1 },
-      { id: 'urgent', value: 'urgent', label: 'Urgent', color: '#ff0000', weight: 9 },
-      { id: 'high', value: 'high', label: 'Very high', color: '#ff8800', weight: 3 }
-    ]
-  }
+    plugins: { getPlugin: (id: string) => (id === 'tasknotes' ? (opts.plugin ?? null) : null) },
+    vault: { getFileByPath: (path: string) => (files.has(path) ? { path } : null) },
+    metadataCache: {
+      getFirstLinkpathDest: (linkpath: string) => {
+        const dest = opts.links?.[linkpath]
+        return dest ? { path: dest } : null
+      }
+    }
+  } as unknown as App
 }
 
-function makeSettings(): PMSettings {
-  return {
-    ...DEFAULT_SETTINGS,
-    statuses: DEFAULT_SETTINGS.statuses.map((s) => ({ ...s })),
-    priorities: DEFAULT_SETTINGS.priorities.map((p) => ({ ...p }))
-  }
-}
-
-describe('importTaskNotesPalettes', () => {
-  it('adds unknown statuses and priorities in TaskNotes order', () => {
-    const settings = makeSettings()
-    const { added } = importTaskNotesPalettes(makeApi(), settings)
-
-    const statusIds = settings.statuses.map((s) => s.id)
-    expect(statusIds).toContain('none')
-    expect(statusIds).toContain('open')
-    expect(statusIds.indexOf('none')).toBeLessThan(statusIds.indexOf('open'))
-
-    const priorityIds = settings.priorities.map((p) => p.id)
-    expect(priorityIds).toContain('urgent')
-    // Higher TaskNotes weight lands earlier (most important first).
-    expect(priorityIds.indexOf('urgent')).toBeLessThan(priorityIds.indexOf('low'))
-    expect(added).toBe(3)
+describe('isTaskNotesInstalled', () => {
+  it('is true when the plugin registry returns a tasknotes plugin', () => {
+    expect(isTaskNotesInstalled(makeApp({ plugin: {} }))).toBe(true)
   })
 
-  it('updates label, color, and completion of entries with a matching id', () => {
-    const settings = makeSettings()
-    const { updated } = importTaskNotesPalettes(makeApi(), settings)
-
-    const done = settings.statuses.find((s) => s.id === 'done')
-    expect(done?.label).toBe('Finished')
-    expect(done?.complete).toBe(true)
-    const high = settings.priorities.find((p) => p.id === 'high')
-    expect(high?.label).toBe('Very high')
-    expect(high?.color).toBe('#ff8800')
-    expect(updated).toBeGreaterThanOrEqual(2)
+  it('is false when the plugin is absent', () => {
+    expect(isTaskNotesInstalled(makeApp())).toBe(false)
   })
 
-  it('keeps entries TaskNotes does not know and is idempotent', () => {
-    const settings = makeSettings()
-    importTaskNotesPalettes(makeApi(), settings)
-    expect(settings.statuses.map((s) => s.id)).toContain('blocked')
-    expect(settings.priorities.map((p) => p.id)).toContain('critical')
+  it('is false when the app exposes no plugin registry', () => {
+    expect(isTaskNotesInstalled({} as App)).toBe(false)
+  })
+})
 
-    const second = importTaskNotesPalettes(makeApi(), settings)
-    expect(second).toEqual({ added: 0, updated: 0 })
+describe('resolveTaskNotesRef', () => {
+  it('resolves a plain vault path that exists', () => {
+    const app = makeApp({ files: ['Projects/Refactoring.md'] })
+    expect(resolveTaskNotesRef(app, 'Projects/Refactoring.md', 'Tasks/a.md')).toBe('Projects/Refactoring.md')
+  })
+
+  it('resolves a wikilink through the metadata cache', () => {
+    const app = makeApp({ links: { Refactoring: 'Projects/Refactoring.md' } })
+    expect(resolveTaskNotesRef(app, '[[Refactoring]]', 'Tasks/a.md')).toBe('Projects/Refactoring.md')
+  })
+
+  it('strips an alias and a heading anchor before resolving', () => {
+    const app = makeApp({ links: { Refactoring: 'Projects/Refactoring.md' } })
+    expect(resolveTaskNotesRef(app, '[[Refactoring#Scope|Obsidian-PM]]', 'Tasks/a.md')).toBe('Projects/Refactoring.md')
+  })
+
+  it('returns null for an unresolvable ref', () => {
+    expect(resolveTaskNotesRef(makeApp(), '[[Nope]]', 'Tasks/a.md')).toBeNull()
+  })
+
+  it('returns null for an empty ref', () => {
+    expect(resolveTaskNotesRef(makeApp(), '[[]]', 'Tasks/a.md')).toBeNull()
   })
 })

@@ -11,8 +11,7 @@ export interface ImportNoteOptions {
 /**
  * The task persistence surface views, modals, and commands program against
  * (`plugin.store`). ProjectStore is the default implementation over pm-task
- * markdown files; alternative backends (e.g. TaskNotes-managed notes) implement
- * the same contract.
+ * markdown files; alternative backends implement the same contract.
  */
 export interface TaskSource {
   registerCacheInvalidation(plugin: Plugin): void
@@ -39,12 +38,6 @@ export interface TaskSource {
   insertTask(project: Project, task: Task, parentId?: string | null): Promise<void>
   duplicateTask(project: Project, sourceId: string, includeSubtasks: boolean): Promise<Task | null>
   importNoteAsTask(project: Project, file: TFile, opts: ImportNoteOptions): Promise<'imported' | 'skipped'>
-  importTaskForest(
-    project: Project,
-    roots: Task[],
-    sources: Map<string, TFile>,
-    handling: 'move' | 'copy'
-  ): Promise<number>
   updateTask(project: Project, taskId: string, patch: Partial<Task>): Promise<void>
   updateTasks(
     project: Project,
