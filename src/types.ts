@@ -161,6 +161,12 @@ export interface PMSettings {
   kanbanShowDescriptionPreview: boolean
   showTagColors: boolean
   saveTaskOnClose: boolean
+  /**
+   * When TaskNotes is installed, share task files with it: PM writes TaskNotes'
+   * task identifier onto its own task files, and accepts TaskNotes-flagged,
+   * project-linked notes as PM tasks. Off = strict separation.
+   */
+  taskNotesInterop: boolean
   projectFilters: Record<string, PerProjectFilter>
   /** Collapsed task ids per project file path. UI state — lives here so toggles don't rewrite task files. */
   collapsedTasks: Record<string, string[]>
@@ -199,6 +205,7 @@ export const DEFAULT_SETTINGS: PMSettings = {
   notificationLeadDays: 2,
   autoSchedule: true,
   saveTaskOnClose: true,
+  taskNotesInterop: true,
   projectFilters: {},
   collapsedTasks: {}
 }

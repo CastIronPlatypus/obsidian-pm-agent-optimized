@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeProject, makeTask, type Project, type SavedView, type Task } from '../types'
+import type { TaskNotesConfig } from '../integrations/tasknotes'
 import { hydrateProjectFromFrontmatter, hydrateTaskFromFile } from './YamlHydrator'
 import { parseFrontmatter } from './YamlParser'
 import { serializeProject, serializeTask, taskFilePath } from './YamlSerializer'
@@ -254,6 +255,48 @@ describe('foreign frontmatter round-trip', () => {
     expect(foreign.customProperties).not.toBe(fm.customProperties)
     ;(foreign.blockedBy as { uid: string }[])[0].uid = 'mutated'
     expect((fm.blockedBy as { uid: string }[])[0].uid).toBe('other')
+  })
+})
+
+// Phase 1: with TaskNotes installed, PM writes TaskNotes' identifier onto its own
+// task files so the same file is a task in both plugins.
+describe('TaskNotes dual identifier on write', () => {
+  const project = makeProject('Test', 'Projects/Test.md')
+  const tagConfig: TaskNotesConfig = { identification: 'tag', taskTag: 'task', fieldName: '', fieldValue: '' }
+
+  it('adds the configured task tag alongside our marker', () => {
+    const task = makeTask({ id: 'dt-1', title: 'Dual', tags: ['work'] })
+    const md = serializeTask(task, project, null, [], tagConfig)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.['pm-task']).toBe(true)
+    expect(frontmatter?.tags).toEqual(['work', 'task'])
+  })
+
+  it('does not duplicate the tag when the task already carries it', () => {
+    const task = makeTask({ id: 'dt-2', tags: ['task'] })
+    const md = serializeTask(task, project, null, [], tagConfig)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.tags).toEqual(['task'])
+  })
+
+  it('writes nothing extra when there is no TaskNotes config', () => {
+    const task = makeTask({ id: 'dt-3', tags: ['work'] })
+    const md = serializeTask(task, project, null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.tags).toEqual(['work'])
+  })
+
+  it('sets a property in property-identification mode', () => {
+    const propConfig: TaskNotesConfig = {
+      identification: 'property',
+      taskTag: 'task',
+      fieldName: 'kind',
+      fieldValue: 'task'
+    }
+    const task = makeTask({ id: 'dt-4' })
+    const md = serializeTask(task, project, null, [], propConfig)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.kind).toBe('task')
   })
 })
 

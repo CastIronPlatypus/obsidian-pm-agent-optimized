@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian'
 import type PMPlugin from './main'
 import { PMSettings, DEFAULT_SETTINGS, makeId } from './types'
+import { isTaskNotesInstalled } from './integrations/tasknotes'
 import { flattenTasks } from './store/TaskTreeOps'
 import { renderPriorityListEditor, renderStatusListEditor } from './ui/PaletteListEditor'
 import { IconButton } from './ui/primitives/IconButton'
@@ -118,6 +119,23 @@ export class PMSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings()
         })
       )
+
+    // ── TaskNotes ─────────────────────────────────────────────────────────────
+    if (isTaskNotesInstalled(this.app)) {
+      new Setting(containerEl).setName('TaskNotes').setHeading()
+
+      new Setting(containerEl)
+        .setName('Share task files with TaskNotes')
+        .setDesc(
+          'Mark project tasks so TaskNotes sees them too, and show TaskNotes tasks linked to a project. Turn off to keep the two plugins separate.'
+        )
+        .addToggle((t) =>
+          t.setValue(this.plugin.settings.taskNotesInterop).onChange(async (v) => {
+            this.plugin.settings.taskNotesInterop = v
+            await this.plugin.saveSettings()
+          })
+        )
+    }
 
     // ── Notifications ─────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Due date notifications').setHeading()
