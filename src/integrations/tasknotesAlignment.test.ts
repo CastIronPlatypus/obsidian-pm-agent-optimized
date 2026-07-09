@@ -5,6 +5,7 @@ import {
   adoptFieldMapping,
   adoptPriorities,
   adoptStatuses,
+  adoptTitleInFrontmatter,
   fieldMappingDiverges,
   PM_FIELD_MAPPING,
   prioritiesDiverge,
@@ -12,8 +13,10 @@ import {
   revertFieldMapping,
   revertPriorities,
   revertStatuses,
+  revertTitleInFrontmatter,
   statusesDiverge,
-  taskNotesStatusesToConfig
+  taskNotesStatusesToConfig,
+  titleStorageDiverges
 } from './tasknotesAlignment'
 
 const TN_STATUSES = [
@@ -177,5 +180,38 @@ describe('adopt/revert field mapping', () => {
   it('adopt is a no-op without TaskNotes', async () => {
     const settings = freshSettings()
     expect(await adoptFieldMapping(makeApp(null).app, settings)).toBe(false)
+  })
+})
+
+describe('title storage', () => {
+  it('diverges when storeTitleInFilename is on (or unset), not when off', () => {
+    expect(titleStorageDiverges(makeApp({ storeTitleInFilename: true }).app)).toBe(true)
+    expect(titleStorageDiverges(makeApp({}).app)).toBe(true) // TaskNotes defaults to on
+    expect(titleStorageDiverges(makeApp({ storeTitleInFilename: false }).app)).toBe(false)
+    expect(titleStorageDiverges(makeApp(null).app)).toBe(false)
+  })
+
+  it('adopt turns it off, snapshots the prior value, and persists', async () => {
+    const tn: Record<string, unknown> = { storeTitleInFilename: true }
+    const h = makeApp(tn)
+    const settings = freshSettings()
+    expect(await adoptTitleInFrontmatter(h.app, settings)).toBe(true)
+    expect(tn.storeTitleInFilename).toBe(false)
+    expect(settings.taskNotesAlignment.titleStorage?.prev).toBe(true)
+    expect(h.saved).toBe(1)
+  })
+
+  it('revert restores the prior value', async () => {
+    const tn: Record<string, unknown> = { storeTitleInFilename: true }
+    const h = makeApp(tn)
+    const settings = freshSettings()
+    await adoptTitleInFrontmatter(h.app, settings)
+    expect(await revertTitleInFrontmatter(h.app, settings)).toBe(true)
+    expect(tn.storeTitleInFilename).toBe(true)
+    expect(settings.taskNotesAlignment.titleStorage).toBeUndefined()
+  })
+
+  it('adopt is a no-op without TaskNotes', async () => {
+    expect(await adoptTitleInFrontmatter(makeApp(null).app, freshSettings())).toBe(false)
   })
 })

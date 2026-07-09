@@ -158,6 +158,8 @@ export interface TaskNotesAlignment {
   priorities?: { appliedAt: string; prev: PriorityConfig[] }
   /** Prior values of the TaskNotes fieldMapping keys we pointed at PM's names. */
   fieldMapping?: { appliedAt: string; prev: Record<string, string> }
+  /** Prior value of TaskNotes' storeTitleInFilename, before we turned it off. */
+  titleStorage?: { appliedAt: string; prev: boolean }
 }
 
 export interface PMSettings {

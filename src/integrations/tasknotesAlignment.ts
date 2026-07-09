@@ -201,6 +201,50 @@ export async function adoptFieldMapping(app: App, settings: PMSettings): Promise
   return true
 }
 
+// ─── Apply / revert: title storage ───────────────────────────────────────────
+
+/**
+ * TaskNotes' `storeTitleInFilename` makes the *filename* the source of truth for
+ * a task's title: on any edit it writes the basename-derived title back into
+ * frontmatter, clobbering the `title:` PM wrote (PM names files by slug/id, not
+ * title). True is the divergent, data-losing state; false lets both plugins read
+ * the title from frontmatter, where they already agree (`fieldMapping.title`).
+ */
+export function storeTitleInFilenameIsOn(app: App): boolean | null {
+  const settings = tnSettings(app)
+  if (!settings) return null
+  // TaskNotes' own default is on, so an unset value is treated as on.
+  return settings.storeTitleInFilename !== false
+}
+
+/** True when TaskNotes would overwrite PM's frontmatter titles from the filename. */
+export function titleStorageDiverges(app: App): boolean {
+  return storeTitleInFilenameIsOn(app) === true
+}
+
+/** Turn TaskNotes' `storeTitleInFilename` off so titles round-trip through frontmatter. */
+export async function adoptTitleInFrontmatter(app: App, settings: PMSettings): Promise<boolean> {
+  const plugin = getTaskNotesPlugin(app)
+  if (!plugin?.settings) return false
+  const prev = plugin.settings.storeTitleInFilename !== false
+  plugin.settings.storeTitleInFilename = false
+  settings.taskNotesAlignment.titleStorage = { appliedAt: new Date().toISOString(), prev }
+  await plugin.saveSettings?.()
+  return true
+}
+
+export async function revertTitleInFrontmatter(app: App, settings: PMSettings): Promise<boolean> {
+  const snap = settings.taskNotesAlignment.titleStorage
+  if (!snap) return false
+  const plugin = getTaskNotesPlugin(app)
+  if (plugin?.settings) {
+    plugin.settings.storeTitleInFilename = snap.prev
+    await plugin.saveSettings?.()
+  }
+  delete settings.taskNotesAlignment.titleStorage
+  return true
+}
+
 export async function revertFieldMapping(app: App, settings: PMSettings): Promise<boolean> {
   const snap = settings.taskNotesAlignment.fieldMapping
   if (!snap) return false

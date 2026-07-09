@@ -6,6 +6,7 @@ import {
   adoptFieldMapping,
   adoptPriorities,
   adoptStatuses,
+  adoptTitleInFrontmatter,
   fieldMappingDiverges,
   prioritiesDiverge,
   readTaskNotesPriorities,
@@ -13,7 +14,9 @@ import {
   revertFieldMapping,
   revertPriorities,
   revertStatuses,
-  statusesDiverge
+  revertTitleInFrontmatter,
+  statusesDiverge,
+  titleStorageDiverges
 } from './integrations/tasknotesAlignment'
 import { flattenTasks } from './store/TaskTreeOps'
 import { renderPriorityListEditor, renderStatusListEditor } from './ui/PaletteListEditor'
@@ -292,6 +295,17 @@ export class PMSettingTab extends PluginSettingTab {
       diverges: fieldMappingDiverges(this.app),
       onAdopt: () => adoptFieldMapping(this.app, this.plugin.settings),
       onRevert: () => revertFieldMapping(this.app, this.plugin.settings)
+    })
+
+    // Title storage: stop TaskNotes overwriting frontmatter titles from the filename.
+    this.alignmentRow(containerEl, {
+      name: 'Keep task titles in frontmatter',
+      applyDesc:
+        "Turn off TaskNotes' store-title-in-filename so it reads titles from frontmatter like PM does. Without this, editing a PM task in TaskNotes can overwrite its title with the file name.",
+      appliedAt: alignment.titleStorage?.appliedAt,
+      diverges: titleStorageDiverges(this.app),
+      onAdopt: () => adoptTitleInFrontmatter(this.app, this.plugin.settings),
+      onRevert: () => revertTitleInFrontmatter(this.app, this.plugin.settings)
     })
 
     // Statuses: adopt TaskNotes' status list into PM's palette (adopt-list-only).
