@@ -7,6 +7,7 @@ import {
   isSharedTaskNote,
   isTaskNotesInstalled,
   mergeProjectLink,
+  resolveProjectLinks,
   resolveTaskNotesRef,
   stampTaskNotesMarker,
   type TaskNotesConfig
@@ -62,6 +63,28 @@ describe('resolveTaskNotesRef', () => {
 
   it('returns null for an empty ref', () => {
     expect(resolveTaskNotesRef(makeApp(), '[[]]', 'Tasks/a.md')).toBeNull()
+  })
+})
+
+describe('resolveProjectLinks', () => {
+  it('resolves every projects[] entry, in order, deduped', () => {
+    const app = makeApp({
+      links: { Refactoring: 'Projects/Refactoring.md', Website: 'Projects/Website.md' }
+    })
+    const fm = { projects: ['[[Refactoring]]', '[[Website]]', '[[Refactoring|Alias]]'] }
+    expect(resolveProjectLinks(fm, app, 'Inbox/a.md')).toEqual(['Projects/Refactoring.md', 'Projects/Website.md'])
+  })
+
+  it('drops entries that do not resolve, keeps the rest', () => {
+    const app = makeApp({ links: { Refactoring: 'Projects/Refactoring.md' } })
+    const fm = { projects: ['[[Nope]]', '[[Refactoring]]'] }
+    expect(resolveProjectLinks(fm, app, 'Inbox/a.md')).toEqual(['Projects/Refactoring.md'])
+  })
+
+  it('returns empty for missing or non-array projects', () => {
+    const app = makeApp()
+    expect(resolveProjectLinks({}, app, 'Inbox/a.md')).toEqual([])
+    expect(resolveProjectLinks({ projects: '[[Refactoring]]' }, app, 'Inbox/a.md')).toEqual([])
   })
 })
 

@@ -1,7 +1,7 @@
 import type { App } from 'obsidian'
 import { TFile } from 'obsidian'
 import { describe, expect, it, vi } from 'vitest'
-import { makeFakeApp, type FakeVault } from '../../test/fakeVault'
+import { makeFakeApp, makeMetadataCache, type FakeVault } from '../../test/fakeVault'
 import { DEFAULT_SETTINGS, makeTask, type PMSettings, type Project, type StatusConfig, type Task } from '../types'
 import { ProjectStore } from './ProjectStore'
 import { buildTaskIndex } from './TaskIndex'
@@ -1017,5 +1017,88 @@ describe('per-project config', () => {
 
     project.config = undefined
     expect(await store.scheduleAfterChange(project, a.id)).toBeGreaterThan(0)
+  })
+})
+
+describe('cross-folder TaskNotes ingestion (Phase 3b)', () => {
+  // A TaskNotes-aware app: metadataCache resolves wikilinks + parses frontmatter,
+  // and a tasknotes plugin is registered in tag-identification mode.
+  function taskNotesApp(): { app: App; vault: FakeVault; newStore: () => ProjectStore } {
+    const { app, vault } = makeFakeApp()
+    const rich = app as unknown as Record<string, unknown>
+    rich.metadataCache = makeMetadataCache(vault)
+    rich.plugins = {
+      getPlugin: (id: string) =>
+        id === 'tasknotes' ? { settings: { taskIdentificationMethod: 'tag', taskTag: 'task' } } : null
+    }
+    const typed = app as unknown as App
+    return { app: typed, vault, newStore: () => new ProjectStore(typed, () => SETTINGS) }
+  }
+
+  const sharedNote = (projectLink: string): string =>
+    [
+      '---',
+      'tags:',
+      '  - task',
+      'projects:',
+      `  - "${projectLink}"`,
+      'id: ext-1',
+      'title: Shared',
+      'status: todo',
+      '---',
+      '',
+      'External body'
+    ].join('\n')
+
+  it('ingests a note outside the _tasks folder via its projects[] wikilink', async () => {
+    const { vault, newStore } = taskNotesApp()
+    await newStore().createProject('Refactoring', 'Projects')
+    await vault.create('Inbox/shared.md', sharedNote('[[Refactoring]]'))
+
+    // Fresh store so the project isn't served from cache (which would skip the sweep).
+    const [loaded] = await newStore().loadAllProjects('Projects')
+    const ext = findTask(loaded.tasks, 'ext-1')
+
+    expect(ext).not.toBeNull()
+    expect(ext?.filePath).toBe('Inbox/shared.md')
+    expect(ext?.external).toBe(true)
+  })
+
+  it('does not ingest a shared note whose wikilink resolves elsewhere', async () => {
+    const { vault, newStore } = taskNotesApp()
+    await newStore().createProject('Refactoring', 'Projects')
+    await vault.create('Inbox/shared.md', sharedNote('[[Website]]'))
+
+    const [loaded] = await newStore().loadAllProjects('Projects')
+    expect(findTask(loaded.tasks, 'ext-1')).toBeNull()
+  })
+
+  it('saves an ingested note in place, backfilling projectId and preserving projects[]', async () => {
+    const { vault, newStore } = taskNotesApp()
+    const seeded = await newStore().createProject('Refactoring', 'Projects')
+    await vault.create('Inbox/shared.md', sharedNote('[[Refactoring]]'))
+
+    const store = newStore()
+    const [loaded] = await store.loadAllProjects('Projects')
+    await store.updateTask(loaded, 'ext-1', { status: 'in-progress' })
+
+    // File stays where the user filed it — never relocated into _tasks/.
+    expect(vault.getFileByPath('Inbox/shared.md')).not.toBeNull()
+    expect(vault.getFileByPath('Projects/Refactoring_tasks/shared.md')).toBeNull()
+
+    const content = await vault.read(expectDefined(vault.getFileByPath('Inbox/shared.md')))
+    expect(content).toContain(`projectId: "${seeded.id}"`)
+    expect(content).toContain('[[Refactoring]]')
+    expect(content).toContain('tags: ["task"]') // TaskNotes tag marker preserved
+  })
+
+  it('ignores shared notes when interop is off', async () => {
+    const { app, vault } = taskNotesApp()
+    const offSettings: PMSettings = { ...SETTINGS, taskNotesInterop: false }
+    await new ProjectStore(app, () => offSettings).createProject('Refactoring', 'Projects')
+    await vault.create('Inbox/shared.md', sharedNote('[[Refactoring]]'))
+
+    const [loaded] = await new ProjectStore(app, () => offSettings).loadAllProjects('Projects')
+    expect(findTask(loaded.tasks, 'ext-1')).toBeNull()
   })
 })

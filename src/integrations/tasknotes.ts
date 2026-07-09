@@ -162,3 +162,21 @@ export function resolveTaskNotesRef(app: App, ref: string, sourcePath: string): 
   if (app.vault.getFileByPath(inner)) return inner
   return app.metadataCache.getFirstLinkpathDest(inner, sourcePath)?.path ?? null
 }
+
+/**
+ * Resolve every entry of a note's `projects[]` frontmatter to a project file
+ * path, deduped and in order. A multi-project note yields one entry per
+ * resolvable target — the array is never truncated. Unresolvable entries are
+ * dropped. Non-array / missing `projects` yields an empty list.
+ */
+export function resolveProjectLinks(fm: Record<string, unknown>, app: App, sourcePath: string): string[] {
+  const projects = fm.projects
+  if (!Array.isArray(projects)) return []
+  const out: string[] = []
+  for (const entry of projects) {
+    if (typeof entry !== 'string') continue
+    const resolved = resolveTaskNotesRef(app, entry, sourcePath)
+    if (resolved && !out.includes(resolved)) out.push(resolved)
+  }
+  return out
+}

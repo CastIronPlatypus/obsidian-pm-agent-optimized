@@ -29,8 +29,23 @@ export class FakeVault {
     return this.files.get(n)?.file ?? this.folders.get(n) ?? null
   }
 
+  getFileByPath(path: string): TFile | null {
+    return this.files.get(normalizePath(path))?.file ?? null
+  }
+
+  getMarkdownFiles(): TFile[] {
+    const out: TFile[] = []
+    for (const { file } of this.files.values()) if (file.extension === 'md') out.push(file)
+    return out
+  }
+
   async cachedRead(file: TFile): Promise<string> {
     return this.files.get(file.path)?.content ?? ''
+  }
+
+  /** Synchronous content peek, for building a metadataCache stub (see makeMetadataCache). */
+  readSync(path: string): string | null {
+    return this.files.get(normalizePath(path))?.content ?? null
   }
 
   async read(file: TFile): Promise<string> {
@@ -184,6 +199,31 @@ export function makeFakeApp(): { app: FakeAppLike; vault: FakeVault } {
     }
   }
   return { app, vault }
+}
+
+/**
+ * A metadataCache backed by the fake vault: `getFileCache` parses a file's
+ * current frontmatter, `getFirstLinkpathDest` resolves a linkpath to the first
+ * markdown file whose basename matches. Opt-in — pass it to a store when a test
+ * needs the cache fast path or wikilink resolution (Phase 3b ingestion).
+ */
+export function makeMetadataCache(vault: FakeVault): {
+  getFileCache: (file: TFile) => { frontmatter?: Record<string, unknown> } | null
+  getFirstLinkpathDest: (linkpath: string, source: string) => { path: string } | null
+} {
+  return {
+    getFileCache: (file: TFile) => {
+      const content = vault.readSync(file.path)
+      if (content == null) return null
+      const { frontmatter } = splitFrontmatter(content)
+      return frontmatter ? { frontmatter } : null
+    },
+    getFirstLinkpathDest: (linkpath: string) => {
+      const target = linkpath.split('#')[0].split('|')[0].trim()
+      for (const f of vault.getMarkdownFiles()) if (f.basename === target) return { path: f.path }
+      return null
+    }
+  }
 }
 
 function splitFrontmatter(content: string): { frontmatter: Record<string, unknown> | null; body: string } {

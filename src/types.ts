@@ -59,6 +59,12 @@ export interface Task {
   updatedAt: string
   filePath?: string // vault path to this task's .md file
   archived?: boolean // runtime only — derived from file location in Archive/ subfolder
+  /**
+   * Runtime only — true when this is a TaskNotes note living *outside* our
+   * `_tasks/` folder, ingested via its `projects[]` wikilink. Signals the save
+   * path to leave the file where it is rather than relocate it into `_tasks/`.
+   */
+  external?: boolean
 }
 
 export interface Project {
