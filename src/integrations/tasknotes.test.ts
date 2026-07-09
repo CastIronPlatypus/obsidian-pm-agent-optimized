@@ -6,6 +6,7 @@ import {
   hasTaskNotesMarker,
   isSharedTaskNote,
   isTaskNotesInstalled,
+  mergeProjectLink,
   resolveTaskNotesRef,
   stampTaskNotesMarker,
   type TaskNotesConfig
@@ -186,5 +187,31 @@ describe('isSharedTaskNote', () => {
 
   it('ignores a project-linked note without the TaskNotes marker', () => {
     expect(isSharedTaskNote({ projectId: 'p1' }, tagConfig)).toBe(false)
+  })
+})
+
+describe('mergeProjectLink', () => {
+  it('appends our link to an empty/absent value', () => {
+    expect(mergeProjectLink(undefined, 'Refactoring')).toEqual(['[[Refactoring]]'])
+    expect(mergeProjectLink([], 'Refactoring')).toEqual(['[[Refactoring]]'])
+  })
+
+  it('keeps foreign entries and appends ours', () => {
+    expect(mergeProjectLink(['[[Other]]'], 'Refactoring')).toEqual(['[[Other]]', '[[Refactoring]]'])
+  })
+
+  it('does not duplicate our link, regardless of form', () => {
+    expect(mergeProjectLink(['[[Refactoring]]'], 'Refactoring')).toEqual(['[[Refactoring]]'])
+    expect(mergeProjectLink(['[[Refactoring|Obsidian-PM]]'], 'Refactoring')).toEqual(['[[Refactoring|Obsidian-PM]]'])
+    expect(mergeProjectLink(['[[Refactoring#Tasks]]'], 'Refactoring')).toEqual(['[[Refactoring#Tasks]]'])
+    expect(mergeProjectLink(['Refactoring'], 'Refactoring')).toEqual(['Refactoring'])
+  })
+
+  it('treats a non-array value as empty', () => {
+    expect(mergeProjectLink('[[Refactoring]]', 'Refactoring')).toEqual(['[[Refactoring]]'])
+  })
+
+  it('drops non-string entries while preserving strings', () => {
+    expect(mergeProjectLink(['[[Other]]', 42], 'Refactoring')).toEqual(['[[Other]]', '[[Refactoring]]'])
   })
 })

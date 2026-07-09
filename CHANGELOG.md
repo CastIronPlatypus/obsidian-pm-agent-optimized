@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - When TaskNotes is installed, project tasks are marked so TaskNotes sees them too, and TaskNotes tasks linked to a project are read as project tasks. A settings toggle turns the sharing off for strict separation ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
+- When TaskNotes is installed, project tasks also carry a `projects` wikilink to their project note, so they show up in TaskNotes' project filter. Any existing project links on the task are kept, and the link follows the project note if it's renamed ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 - When TaskNotes is installed, settings offer to align the two plugins' vocabulary in one click: adopt TaskNotes' status and priority lists, let TaskNotes read the field names this plugin already writes, and keep task titles in frontmatter so editing a task in TaskNotes no longer overwrites its title with the file name. Each alignment only changes settings — no task files are rewritten — and every one has a Revert that restores your previous values exactly ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 - Priorities can be added, renamed, recolored, and reordered in settings
 - Status and priority icons accept emoji or any icon available in Obsidian, including Lucide icons and icons added by other plugins, with suggestions while typing in settings

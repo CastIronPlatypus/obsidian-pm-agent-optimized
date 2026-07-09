@@ -300,6 +300,57 @@ describe('TaskNotes dual identifier on write', () => {
   })
 })
 
+describe('TaskNotes project link on write', () => {
+  const project = makeProject('Test', 'Projects/Refactoring.md')
+  const tagConfig: TaskNotesConfig = { identification: 'tag', taskTag: 'task', fieldName: '', fieldValue: '' }
+
+  it('emits both projectId and the projects wikilink', () => {
+    const task = makeTask({ id: 'pl-1' })
+    const { frontmatter } = parseFrontmatter(serializeTask(task, project, null, [], tagConfig))
+    expect(frontmatter?.projectId).toBe(project.id)
+    expect(frontmatter?.projects).toEqual(['[[Refactoring]]'])
+  })
+
+  it('preserves foreign projects entries and adds ours', () => {
+    const task = makeTask({ id: 'pl-2', foreign: { projects: ['[[Other]]'] } })
+    const { frontmatter } = parseFrontmatter(serializeTask(task, project, null, [], tagConfig))
+    expect(frontmatter?.projects).toEqual(['[[Other]]', '[[Refactoring]]'])
+  })
+
+  it('does not duplicate an existing link to the same project', () => {
+    const task = makeTask({ id: 'pl-3', foreign: { projects: ['[[Refactoring|Obsidian-PM]]'] } })
+    const { frontmatter } = parseFrontmatter(serializeTask(task, project, null, [], tagConfig))
+    expect(frontmatter?.projects).toEqual(['[[Refactoring|Obsidian-PM]]'])
+  })
+
+  it('tracks the project current basename on rename', () => {
+    const renamed = makeProject('Test', 'Projects/Renamed.md')
+    const task = makeTask({ id: 'pl-4' })
+    const { frontmatter } = parseFrontmatter(serializeTask(task, renamed, null, [], tagConfig))
+    expect(frontmatter?.projects).toEqual(['[[Renamed]]'])
+  })
+
+  it('writes no projects key with interop off and none present', () => {
+    const task = makeTask({ id: 'pl-5' })
+    const { frontmatter } = parseFrontmatter(serializeTask(task, project, null))
+    expect(frontmatter && 'projects' in frontmatter).toBe(false)
+  })
+
+  it('passes foreign projects through untouched with interop off', () => {
+    const task = makeTask({ id: 'pl-6', foreign: { projects: ['[[Other]]'] } })
+    const { frontmatter } = parseFrontmatter(serializeTask(task, project, null))
+    expect(frontmatter?.projects).toEqual(['[[Other]]'])
+  })
+
+  it('backfills projectId for a shared TaskNotes task, preserving its projects', () => {
+    // A TaskNotes note dropped into the project folder: projects[] link, no projectId.
+    const shared = makeTask({ id: 'pl-7', foreign: { projects: ['[[Refactoring]]'] } })
+    const { frontmatter } = parseFrontmatter(serializeTask(shared, project, null, [], tagConfig))
+    expect(frontmatter?.projectId).toBe(project.id)
+    expect(frontmatter?.projects).toEqual(['[[Refactoring]]'])
+  })
+})
+
 describe('project round-trip', () => {
   it('preserves core project fields', () => {
     const p = makeProject('My Project', 'Projects/MyProject.md')

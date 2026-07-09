@@ -124,6 +124,35 @@ export function stampTaskNotesMarker(fm: Record<string, unknown>, config: TaskNo
 }
 
 /**
+ * Extract a wikilink's target basename: `[[Foo|Bar]]` → `Foo`, `[[Foo#Sec]]` →
+ * `Foo`, plain `Foo` → `Foo`. Returns null for anything that isn't a non-empty
+ * string. Used to dedupe project links by what they point at, not their raw form.
+ */
+function wikilinkTarget(entry: unknown): string | null {
+  if (typeof entry !== 'string') return null
+  const inner = entry.replace(/^\[\[/, '').replace(/\]\]$/, '').split('|')[0].split('#')[0].trim()
+  return inner || null
+}
+
+/**
+ * Merge our project wikilink into an existing (possibly foreign) `projects[]`
+ * value, deduping on target basename. Foreign entries are kept and ordered first;
+ * ours is appended only when no entry already resolves to `basename`. Non-array
+ * input is treated as empty, so a malformed foreign value can't throw.
+ */
+export function mergeProjectLink(existing: unknown, basename: string): string[] {
+  const entries = Array.isArray(existing) ? existing : []
+  const out: string[] = []
+  let hasOurs = false
+  for (const entry of entries) {
+    if (typeof entry === 'string') out.push(entry)
+    if (wikilinkTarget(entry) === basename) hasOurs = true
+  }
+  if (!hasOurs) out.push(`[[${basename}]]`)
+  return out
+}
+
+/**
  * Resolve a TaskNotes reference (a "[[wikilink]]" or a plain vault path) to a
  * vault file path, or null when it doesn't resolve.
  */
