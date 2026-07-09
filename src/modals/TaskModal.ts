@@ -7,6 +7,7 @@ import {
   Modal,
   MarkdownRenderer,
   Notice,
+  TFile,
   setIcon,
   setTooltip
 } from 'obsidian'
@@ -151,12 +152,25 @@ export class TaskModal extends Modal {
         item
           .setTitle('Open as note')
           .setIcon('file-text')
-          .onClick(() => {
-            this.saved = false
-            this.cancelled = false
-            this.close()
-            void this.app.workspace.openLinkText(filePath, '', true)
-          })
+          .onClick(
+            safeAsync(async () => {
+              // Resolve the TFile and open it directly — passing the full ".md"
+              // path to openLinkText fails link resolution and opens nothing.
+              // Open before close() so the auto-save-on-close (which may rewrite
+              // or rename the file) can't strand the lookup.
+              const file = this.app.vault.getAbstractFileByPath(filePath)
+              if (!(file instanceof TFile)) {
+                new Notice('Could not find the task note on disk')
+                return
+              }
+              const leaf = this.app.workspace.getLeaf('tab')
+              await leaf.openFile(file)
+              this.saved = false
+              this.cancelled = false
+              this.close()
+              await this.app.workspace.revealLeaf(leaf)
+            })
+          )
       )
       menu.addSeparator()
     }
