@@ -2,6 +2,19 @@ import { App, PluginSettingTab, Setting, Notice } from 'obsidian'
 import type PMPlugin from './main'
 import { PMSettings, DEFAULT_SETTINGS, makeId } from './types'
 import { isTaskNotesInstalled } from './integrations/tasknotes'
+import {
+  adoptFieldMapping,
+  adoptPriorities,
+  adoptStatuses,
+  fieldMappingDiverges,
+  prioritiesDiverge,
+  readTaskNotesPriorities,
+  readTaskNotesStatuses,
+  revertFieldMapping,
+  revertPriorities,
+  revertStatuses,
+  statusesDiverge
+} from './integrations/tasknotesAlignment'
 import { flattenTasks } from './store/TaskTreeOps'
 import { renderPriorityListEditor, renderStatusListEditor } from './ui/PaletteListEditor'
 import { IconButton } from './ui/primitives/IconButton'
@@ -133,8 +146,11 @@ export class PMSettingTab extends PluginSettingTab {
           t.setValue(this.plugin.settings.taskNotesInterop).onChange(async (v) => {
             this.plugin.settings.taskNotesInterop = v
             await this.plugin.saveSettings()
+            this.display()
           })
         )
+
+      if (this.plugin.settings.taskNotesInterop) this.renderTaskNotesAlignment(containerEl)
     }
 
     // ── Notifications ─────────────────────────────────────────────────────────
@@ -254,6 +270,99 @@ export class PMSettingTab extends PluginSettingTab {
           this.renderPriorityList(priorityContainer)
         })
     )
+  }
+
+  private renderTaskNotesAlignment(containerEl: HTMLElement): void {
+    const alignment = this.plugin.settings.taskNotesAlignment
+    const tnStatuses = readTaskNotesStatuses(this.app)
+    const tnPriorities = readTaskNotesPriorities(this.app)
+
+    new Setting(containerEl).setName('Align vocabulary').setHeading()
+    containerEl.createEl('p', {
+      cls: 'pm-settings-desc',
+      text: 'Give both plugins one shared vocabulary. These only change settings — no task files are rewritten, and every option is reversible.'
+    })
+
+    // Field names: point TaskNotes' field mapping at the keys PM already writes.
+    this.alignmentRow(containerEl, {
+      name: "Let TaskNotes read PM's field names",
+      applyDesc:
+        "Point TaskNotes at PM's start, createdAt, and updatedAt keys so PM tasks show their dates in TaskNotes.",
+      appliedAt: alignment.fieldMapping?.appliedAt,
+      diverges: fieldMappingDiverges(this.app),
+      onAdopt: () => adoptFieldMapping(this.app, this.plugin.settings),
+      onRevert: () => revertFieldMapping(this.app, this.plugin.settings)
+    })
+
+    // Statuses: adopt TaskNotes' status list into PM's palette (adopt-list-only).
+    this.alignmentRow(containerEl, {
+      name: "Adopt TaskNotes' status list",
+      applyDesc: tnStatuses
+        ? `Replace PM's statuses with TaskNotes' (${tnStatuses.map((s) => s.label).join(', ')}). Task values are untouched.`
+        : 'TaskNotes exposes no status list.',
+      appliedAt: alignment.statuses?.appliedAt,
+      diverges: tnStatuses ? statusesDiverge(this.plugin.settings.statuses, tnStatuses) : false,
+      onAdopt: () => Promise.resolve(adoptStatuses(this.app, this.plugin.settings)),
+      onRevert: () => Promise.resolve(revertStatuses(this.plugin.settings))
+    })
+
+    // Priorities: same adopt-list-only shape.
+    this.alignmentRow(containerEl, {
+      name: "Adopt TaskNotes' priority list",
+      applyDesc: tnPriorities
+        ? `Replace PM's priorities with TaskNotes' (${tnPriorities.map((p) => p.label).join(', ')}). Task values are untouched.`
+        : 'TaskNotes exposes no priority list.',
+      appliedAt: alignment.priorities?.appliedAt,
+      diverges: tnPriorities ? prioritiesDiverge(this.plugin.settings.priorities, tnPriorities) : false,
+      onAdopt: () => Promise.resolve(adoptPriorities(this.app, this.plugin.settings)),
+      onRevert: () => Promise.resolve(revertPriorities(this.plugin.settings))
+    })
+  }
+
+  private alignmentRow(
+    containerEl: HTMLElement,
+    opts: {
+      name: string
+      applyDesc: string
+      appliedAt?: string
+      diverges: boolean
+      onAdopt: () => Promise<boolean>
+      onRevert: () => Promise<boolean>
+    }
+  ): void {
+    const applied = opts.appliedAt !== undefined
+    const setting = new Setting(containerEl).setName(opts.name)
+
+    if (applied) {
+      const on = new Date(opts.appliedAt as string).toLocaleDateString()
+      setting.setDesc(`Aligned with TaskNotes on ${on}. Revert to restore your previous values exactly.`)
+      setting.addButton((btn) =>
+        btn.setButtonText('Revert').onClick(async () => {
+          if (await opts.onRevert()) await this.applyAlignmentChange()
+        })
+      )
+      return
+    }
+
+    setting.setDesc(opts.applyDesc)
+    if (opts.diverges) {
+      setting.addButton((btn) =>
+        btn
+          .setButtonText('Align')
+          .setCta()
+          .onClick(async () => {
+            if (await opts.onAdopt()) await this.applyAlignmentChange()
+          })
+      )
+    } else {
+      setting.addExtraButton((btn) => btn.setIcon('check').setTooltip('Already aligned').setDisabled(true))
+    }
+  }
+
+  private async applyAlignmentChange(): Promise<void> {
+    await this.plugin.saveSettings()
+    this.plugin.refreshProjectViews()
+    this.display()
   }
 
   private renderMembersList(container: HTMLElement): void {

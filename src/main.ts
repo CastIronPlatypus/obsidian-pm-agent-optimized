@@ -180,6 +180,8 @@ export default class PMPlugin extends Plugin {
     if (!saved?.priorities?.length) this.settings.priorities = DEFAULT_SETTINGS.priorities
     if (!this.settings.projectFilters) this.settings.projectFilters = {}
     if (!this.settings.collapsedTasks) this.settings.collapsedTasks = {}
+    // Fresh object, never the shared DEFAULT_SETTINGS reference (Object.assign is shallow).
+    this.settings.taskNotesAlignment = saved?.taskNotesAlignment ?? {}
 
     let migrated = false
     for (const s of this.settings.statuses) {

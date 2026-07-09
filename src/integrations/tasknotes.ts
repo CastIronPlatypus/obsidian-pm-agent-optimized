@@ -11,7 +11,17 @@ export interface TaskNotesDependency {
   gap?: string
 }
 
-function getTaskNotesPlugin(app: App): object | null {
+/**
+ * The slice of TaskNotes' plugin instance we touch: its persisted `settings`
+ * object and its `saveSettings` writer. Both are optional — we probe defensively
+ * so a TaskNotes shape change can't throw inside PM.
+ */
+export interface TaskNotesPlugin {
+  settings?: Record<string, unknown>
+  saveSettings?: () => unknown
+}
+
+export function getTaskNotesPlugin(app: App): TaskNotesPlugin | null {
   const registry = (app as App & { plugins?: { getPlugin?: (id: string) => unknown } }).plugins
   const plugin = registry?.getPlugin?.('tasknotes')
   return plugin && typeof plugin === 'object' ? plugin : null

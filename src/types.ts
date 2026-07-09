@@ -146,6 +146,20 @@ export interface PriorityConfig {
   icon: string
 }
 
+/**
+ * One reversible alignment PM has applied against TaskNotes. `appliedAt` is an
+ * ISO timestamp; `prev` is the exact value we overwrote, so Revert restores it
+ * byte-for-byte. Absent field = that alignment has not been applied.
+ */
+export interface TaskNotesAlignment {
+  /** Prior PM status palette, before adopting TaskNotes' list. */
+  statuses?: { appliedAt: string; prev: StatusConfig[] }
+  /** Prior PM priority palette, before adopting TaskNotes' list. */
+  priorities?: { appliedAt: string; prev: PriorityConfig[] }
+  /** Prior values of the TaskNotes fieldMapping keys we pointed at PM's names. */
+  fieldMapping?: { appliedAt: string; prev: Record<string, string> }
+}
+
 export interface PMSettings {
   projectsFolder: string
   defaultView: ViewMode
@@ -167,6 +181,12 @@ export interface PMSettings {
    * project-linked notes as PM tasks. Off = strict separation.
    */
   taskNotesInterop: boolean
+  /**
+   * Snapshots taken when the user aligns PM's vocabulary with TaskNotes, so each
+   * alignment is exactly reversible. All options here are config-only — they
+   * touch settings, never task files. See `integrations/tasknotesAlignment.ts`.
+   */
+  taskNotesAlignment: TaskNotesAlignment
   projectFilters: Record<string, PerProjectFilter>
   /** Collapsed task ids per project file path. UI state — lives here so toggles don't rewrite task files. */
   collapsedTasks: Record<string, string[]>
@@ -206,6 +226,7 @@ export const DEFAULT_SETTINGS: PMSettings = {
   autoSchedule: true,
   saveTaskOnClose: true,
   taskNotesInterop: true,
+  taskNotesAlignment: {},
   projectFilters: {},
   collapsedTasks: {}
 }
