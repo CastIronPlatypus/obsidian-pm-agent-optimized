@@ -205,6 +205,32 @@ describe('foreign frontmatter round-trip', () => {
     }
   })
 
+  it('does not misread a TaskNotes file timeEstimate (minutes) as our hours, and round-trips it', () => {
+    // No pm-task marker: this is a TaskNotes-authored task shared in. Its
+    // `timeEstimate` is minutes, so we must not read it into our hours field —
+    // we pass it through foreign untouched instead.
+    const fm: Record<string, unknown> = {
+      title: 'TaskNotes task',
+      status: 'open',
+      tags: ['task'],
+      timeEstimate: 90
+    }
+    const { task } = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/estimate.md')
+    expect(task.timeEstimate).toBeUndefined()
+
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    if (!frontmatter) throw new Error('frontmatter missing')
+    expect(frontmatter.timeEstimate).toBe(90)
+  })
+
+  it('reads timeEstimate as ours (hours) on a pm-task file', () => {
+    const fm: Record<string, unknown> = { 'pm-task': true, id: 't-est', title: 'PM task', timeEstimate: 8 }
+    const { task } = hydrateTaskFromFile(fm, '', 'Projects/Test_tasks/est.md')
+    expect(task.timeEstimate).toBe(8)
+    expect(task.foreign?.timeEstimate).toBeUndefined()
+  })
+
   it('keeps a string recurrence foreign rather than coercing it into our object shape', () => {
     const { task } = hydrateTaskFromFile({ id: 't-rec', recurrence: 'FREQ=DAILY' }, '', 'Projects/Test_tasks/rec.md')
     expect(task.recurrence).toBeUndefined()
