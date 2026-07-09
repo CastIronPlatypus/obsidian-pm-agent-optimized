@@ -244,17 +244,87 @@ describe('foreign frontmatter round-trip', () => {
   it('does not alias foreign containers from the source frontmatter', () => {
     const fm: Record<string, unknown> = {
       id: 't-alias',
-      blockedBy: [{ uid: 'other', reltype: 'FS' }],
       customProperties: { foo: 'bar' }
     }
     const { task } = hydrateTaskFromFile(fm, '', 'Projects/Test_tasks/alias.md')
     const foreign = task.foreign
     if (!foreign) throw new Error('foreign missing')
 
-    expect(foreign.blockedBy).not.toBe(fm.blockedBy)
     expect(foreign.customProperties).not.toBe(fm.customProperties)
-    ;(foreign.blockedBy as { uid: string }[])[0].uid = 'mutated'
-    expect((fm.blockedBy as { uid: string }[])[0].uid).toBe('other')
+    ;(foreign.customProperties as { foo: string }).foo = 'mutated'
+    expect((fm.customProperties as { foo: string }).foo).toBe('bar')
+  })
+})
+
+// Phase 4: TaskNotes' RFC 9253 `blockedBy` folds into our flat `dependencies[]`,
+// and the full relation (reltype/gap) survives a PM edit round-trip.
+describe('TaskNotes blockedBy round-trip', () => {
+  const project = makeProject('Test', 'Projects/Test.md')
+
+  it('reads blockedBy into dependencies and captures the original entries', () => {
+    const fm: Record<string, unknown> = {
+      id: 'bb-read',
+      blockedBy: [{ uid: 'a', reltype: 'SS', gap: 'P2D' }, { uid: 'b' }]
+    }
+    const { task } = hydrateTaskFromFile(fm, '', 'Projects/Test_tasks/bb.md')
+
+    expect(task.dependencies).toEqual(['a', 'b'])
+    expect(task.taskNotesBlockedBy).toEqual([{ uid: 'a', reltype: 'SS', gap: 'P2D' }, { uid: 'b' }])
+    // Captured, not passed through as a foreign duplicate.
+    expect(task.foreign?.blockedBy).toBeUndefined()
+  })
+
+  it('preserves reltype/gap when an unrelated field is edited and saved', () => {
+    const fm: Record<string, unknown> = {
+      'pm-task': true,
+      id: 'bb-edit',
+      title: 'Blocked task',
+      blockedBy: [{ uid: 'x', reltype: 'SS', gap: 'P2D' }]
+    }
+    const { task } = hydrateTaskFromFile(fm, '', 'Projects/Test_tasks/bb.md')
+    task.status = 'in-progress'
+
+    const md = serializeTask(task, project, null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.blockedBy).toEqual([{ uid: 'x', reltype: 'SS', gap: 'P2D' }])
+    expect(frontmatter?.dependencies).toEqual(['x'])
+  })
+
+  it('appends FS/P0D defaults for a dependency added in PM', () => {
+    const { task } = hydrateTaskFromFile(
+      { id: 'bb-add', blockedBy: [{ uid: 'x', reltype: 'SS', gap: 'P2D' }] },
+      '',
+      'Projects/Test_tasks/bb.md'
+    )
+    task.dependencies.push('y')
+
+    const md = serializeTask(task, project, null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.blockedBy).toEqual([
+      { uid: 'x', reltype: 'SS', gap: 'P2D' },
+      { uid: 'y', reltype: 'FS', gap: 'P0D' }
+    ])
+  })
+
+  it('drops the matching entry when a dependency is removed in PM', () => {
+    const { task } = hydrateTaskFromFile(
+      { id: 'bb-del', blockedBy: [{ uid: 'x', reltype: 'SS' }, { uid: 'y' }] },
+      '',
+      'Projects/Test_tasks/bb.md'
+    )
+    task.dependencies = task.dependencies.filter((d) => d !== 'x')
+
+    const md = serializeTask(task, project, null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.blockedBy).toEqual([{ uid: 'y' }])
+  })
+
+  it('never emits blockedBy for a PM-native task that never had one', () => {
+    const task = makeTask({ id: 'bb-native', dependencies: ['z'] })
+    const md = serializeTask(task, project, null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.blockedBy).toBeUndefined()
+    expect(frontmatter?.dependencies).toEqual(['z'])
   })
 })
 

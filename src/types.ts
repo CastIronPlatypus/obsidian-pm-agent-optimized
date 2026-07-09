@@ -1,4 +1,5 @@
 import { today } from './dates'
+import type { TaskNotesDependency } from './integrations/tasknotes'
 import type { TaskIndex } from './store/TaskIndex'
 
 export type TaskStatus = string
@@ -53,6 +54,14 @@ export interface Task {
    * verbatim so our writes don't destroy them. Never read by our own code.
    */
   foreign?: Record<string, unknown>
+  /**
+   * TaskNotes' RFC 9253 `blockedBy` array as read from frontmatter, kept verbatim
+   * so we can regenerate it on write without losing each entry's `reltype`/`gap`.
+   * Our flat `dependencies[]` holds just the uids (all the Gantt renders today);
+   * this preserves the full relation model for lossless round-trips. Runtime only,
+   * only present when the file carried a parseable `blockedBy`.
+   */
+  taskNotesBlockedBy?: TaskNotesDependency[]
   /** UI state, persisted per project in plugin settings (data.json), not in frontmatter. */
   collapsed: boolean
   createdAt: string

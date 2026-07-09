@@ -11,6 +11,46 @@ export interface TaskNotesDependency {
   gap?: string
 }
 
+/** RFC 9253 defaults for a dependency PM added: finish-to-start, no lag. */
+const DEFAULT_RELTYPE = 'FS'
+const DEFAULT_GAP = 'P0D'
+
+/**
+ * Parse a raw `blockedBy` frontmatter value into typed entries, keeping each
+ * entry's `reltype`/`gap` when present. Only entries with a non-empty string
+ * `uid` survive — anything malformed is dropped, so a garbage value can't crash
+ * a read. Returns [] when there's nothing usable, which the caller treats as
+ * "not captured" and leaves the original value in `foreign` for verbatim passthrough.
+ */
+export function parseBlockedBy(value: unknown): TaskNotesDependency[] {
+  if (!Array.isArray(value)) return []
+  const out: TaskNotesDependency[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const e = entry as Record<string, unknown>
+    if (typeof e.uid !== 'string' || !e.uid) continue
+    const dep: TaskNotesDependency = { uid: e.uid }
+    if (typeof e.reltype === 'string' && e.reltype) dep.reltype = e.reltype
+    if (typeof e.gap === 'string' && e.gap) dep.gap = e.gap
+    out.push(dep)
+  }
+  return out
+}
+
+/**
+ * Rebuild `blockedBy` from our flat `dependencies[]` and the original entries we
+ * captured on read. Walks `dependencies` in order so the result follows PM's list:
+ * a uid still present reuses its original entry (preserving `reltype`/`gap`); a uid
+ * we added gets FS/P0D defaults; an original whose uid was removed simply falls away.
+ */
+export function mergeBlockedBy(
+  original: TaskNotesDependency[],
+  dependencies: readonly string[]
+): TaskNotesDependency[] {
+  const byUid = new Map(original.map((d) => [d.uid, d]))
+  return dependencies.map((uid) => byUid.get(uid) ?? { uid, reltype: DEFAULT_RELTYPE, gap: DEFAULT_GAP })
+}
+
 /**
  * The slice of TaskNotes' plugin instance we touch: its persisted `settings`
  * object and its `saveSettings` writer. Both are optional — we probe defensively
