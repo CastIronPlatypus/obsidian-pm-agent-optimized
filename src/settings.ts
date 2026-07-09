@@ -369,7 +369,7 @@ export class PMSettingTab extends PluginSettingTab {
           })
       )
     } else {
-      setting.addExtraButton((btn) => btn.setIcon('check').setTooltip('Already aligned').setDisabled(true))
+      setting.addButton((btn) => btn.setButtonText('Aligned').setDisabled(true).setTooltip('Already matches TaskNotes'))
     }
   }
 
