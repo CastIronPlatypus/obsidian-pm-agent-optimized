@@ -76,7 +76,8 @@ export function buildTaskFrontmatter(
   task: Task,
   project: Project,
   parentTask: Task | null,
-  taskNotes: TaskNotesConfig | null = null
+  taskNotes: TaskNotesConfig | null = null,
+  blockedByUid?: (id: string) => string
 ): Record<string, unknown> {
   const fm: Record<string, unknown> = {
     [TASK_FRONTMATTER_KEY]: true,
@@ -105,8 +106,11 @@ export function buildTaskFrontmatter(
   // Regenerate TaskNotes' RFC 9253 `blockedBy` from the entries we captured on
   // read, reconciled against our current `dependencies[]`: kept relations keep
   // their reltype/gap, removed deps fall away, added deps get FS/P0D defaults.
-  // `dependencies` above stays too, so PM-only readers still see the flat list.
-  if (task.taskNotesBlockedBy) fm.blockedBy = mergeBlockedBy(task.taskNotesBlockedBy, task.dependencies)
+  // Uids are written as `[[note-basename]]` (via `blockedByUid`) so TaskNotes
+  // resolves them; `dependencies` above stays as bare ids for PM-only readers.
+  if (task.taskNotesBlockedBy) {
+    fm.blockedBy = mergeBlockedBy(task.taskNotesBlockedBy, task.dependencies, blockedByUid)
+  }
   // Another plugin's keys, carried through untouched. Written last, and never
   // over a field we own — a foreign `recurrence` only lands when we have none.
   if (task.foreign) {
@@ -131,9 +135,10 @@ export function serializeTask(
   project: Project,
   parentTask: Task | null,
   statuses: StatusConfig[] = [],
-  taskNotes: TaskNotesConfig | null = null
+  taskNotes: TaskNotesConfig | null = null,
+  blockedByUid?: (id: string) => string
 ): string {
-  const fm = buildTaskFrontmatter(task, project, parentTask, taskNotes)
+  const fm = buildTaskFrontmatter(task, project, parentTask, taskNotes, blockedByUid)
 
   const yamlLines: string[] = ['---']
   appendYaml(yamlLines, fm, 0)
@@ -165,7 +170,7 @@ export function serializeTask(
 }
 
 /** A vault file path's basename without its `.md` extension, for `[[wikilinks]]`. */
-function noteBasename(filePath: string): string {
+export function noteBasename(filePath: string): string {
   return filePath.replace(/^.*\//, '').replace(/\.md$/, '')
 }
 

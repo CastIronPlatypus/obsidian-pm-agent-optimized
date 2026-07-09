@@ -38,17 +38,36 @@ export function parseBlockedBy(value: unknown): TaskNotesDependency[] {
 }
 
 /**
+ * Strip a `blockedBy` uid to its inner link target: `[[Foo|Bar]]` → `Foo`,
+ * `[[Foo#Sec]]` → `Foo`, plain `id` → `id`. TaskNotes writes uids as wikilinks
+ * (by note name or id) while our `dependencies[]` key on the bare task id, so we
+ * unwrap before resolving. Returns the input trimmed when there's nothing to strip.
+ */
+export function blockedByUidTarget(uid: string): string {
+  return uid.replace(/^\[\[/, '').replace(/\]\]$/, '').split('|')[0].split('#')[0].trim()
+}
+
+/**
  * Rebuild `blockedBy` from our flat `dependencies[]` and the original entries we
  * captured on read. Walks `dependencies` in order so the result follows PM's list:
  * a uid still present reuses its original entry (preserving `reltype`/`gap`); a uid
  * we added gets FS/P0D defaults; an original whose uid was removed simply falls away.
+ *
+ * `toUid` maps a bare task id to the form written to disk — pass a resolver that
+ * returns `[[note-basename]]` so TaskNotes recognises the link; the default keeps
+ * the bare id. Original entries are matched by bare id, so read-side resolution
+ * (see `blockedByUidTarget`) must run first for `reltype`/`gap` to be preserved.
  */
 export function mergeBlockedBy(
   original: TaskNotesDependency[],
-  dependencies: readonly string[]
+  dependencies: readonly string[],
+  toUid: (id: string) => string = (id) => id
 ): TaskNotesDependency[] {
   const byUid = new Map(original.map((d) => [d.uid, d]))
-  return dependencies.map((uid) => byUid.get(uid) ?? { uid, reltype: DEFAULT_RELTYPE, gap: DEFAULT_GAP })
+  return dependencies.map((id) => {
+    const kept = byUid.get(id)
+    return kept ? { ...kept, uid: toUid(id) } : { uid: toUid(id), reltype: DEFAULT_RELTYPE, gap: DEFAULT_GAP }
+  })
 }
 
 /**

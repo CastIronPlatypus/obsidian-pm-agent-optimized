@@ -1102,3 +1102,71 @@ describe('cross-folder TaskNotes ingestion (Phase 3b)', () => {
     expect(findTask(loaded.tasks, 'ext-1')).toBeNull()
   })
 })
+
+describe('TaskNotes blockedBy uid resolution (Phase 4)', () => {
+  // metadataCache resolves wikilinks by basename, as the real one does.
+  function cachedApp(): { app: App; vault: FakeVault; newStore: () => ProjectStore } {
+    const { app, vault } = makeFakeApp()
+    ;(app as unknown as Record<string, unknown>).metadataCache = makeMetadataCache(vault)
+    const typed = app as unknown as App
+    return { app: typed, vault, newStore: () => new ProjectStore(typed, () => SETTINGS) }
+  }
+
+  function fileAt(vault: FakeVault, path: string): TFile {
+    const file = vault.getAbstractFileByPath(path)
+    if (!(file instanceof TFile)) throw new Error(`missing ${path}`)
+    return file
+  }
+
+  it('resolves a wikilink blockedBy uid to a bare task id, and writes it back as a wikilink', async () => {
+    const { vault, newStore } = cachedApp()
+    const store = newStore()
+    const project = await store.createProject('Interop', 'Projects')
+    const a = await addNamed(store, project, 'Alpha')
+    const b = await addNamed(store, project, 'Beta')
+    const aBase = expectDefined(a.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    const bPath = expectDefined(b.filePath)
+
+    // TaskNotes records "Beta blocked by Alpha" as a wikilink to Alpha's note.
+    await vault.process(fileAt(vault, bPath), (content) =>
+      content.replace(/^---\n/, `---\nblockedBy:\n  - uid: "[[${aBase}]]"\n    reltype: "SS"\n    gap: "P2D"\n`)
+    )
+
+    // Fresh store: read from disk with wikilink resolution available.
+    const store2 = newStore()
+    const reloaded = expectDefined(await store2.loadProject(fileAt(vault, project.filePath)))
+    const beta = expectDefined(findTask(reloaded.tasks, b.id))
+    expect(beta.dependencies).toContain(a.id) // rendered as a real dependency
+    expect(beta.dependencies).not.toContain(`[[${aBase}]]`) // wikilink noise gone
+
+    // A save re-emits the uid as a wikilink (TaskNotes' form), reltype/gap intact;
+    // the flat dependencies list stays bare ids for PM.
+    await store2.updateTask(reloaded, b.id, { status: 'in-progress' })
+    const content = await vault.cachedRead(fileAt(vault, bPath))
+    expect(content).toContain(`uid: "[[${aBase}]]"`)
+    expect(content).toContain('reltype: "SS"')
+    expect(content).toContain('gap: "P2D"')
+    expect(content).toContain(`dependencies: ["${a.id}"]`)
+  })
+
+  it('collapses a bare-id + wikilink pair pointing at the same task', async () => {
+    const { vault, newStore } = cachedApp()
+    const store = newStore()
+    const project = await store.createProject('Interop', 'Projects')
+    const a = await addNamed(store, project, 'Alpha')
+    const b = await addNamed(store, project, 'Beta')
+    const aBase = expectDefined(a.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    const bPath = expectDefined(b.filePath)
+
+    await vault.process(fileAt(vault, bPath), (content) =>
+      content.replace(
+        /^---\n/,
+        `---\nblockedBy:\n  - uid: "${a.id}"\n    reltype: "FS"\n  - uid: "[[${aBase}]]"\n    reltype: "SS"\n`
+      )
+    )
+
+    const reloaded = expectDefined(await newStore().loadProject(fileAt(vault, project.filePath)))
+    const beta = expectDefined(findTask(reloaded.tasks, b.id))
+    expect(beta.dependencies).toEqual([a.id]) // deduped to a single dependency
+  })
+})

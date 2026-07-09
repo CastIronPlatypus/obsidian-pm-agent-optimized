@@ -326,6 +326,25 @@ describe('TaskNotes blockedBy round-trip', () => {
     expect(frontmatter?.blockedBy).toBeUndefined()
     expect(frontmatter?.dependencies).toEqual(['z'])
   })
+
+  it('writes uids as wikilinks when a resolver is supplied, keeping dependencies bare', () => {
+    const { task } = hydrateTaskFromFile(
+      { id: 'bb-wl', blockedBy: [{ uid: 'x', reltype: 'SS', gap: 'P2D' }] },
+      '',
+      'Projects/Test_tasks/bb.md'
+    )
+    task.dependencies.push('y')
+    const toUid = (id: string) => `[[note-${id}]]`
+
+    const md = serializeTask(task, project, null, [], null, toUid)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.blockedBy).toEqual([
+      { uid: '[[note-x]]', reltype: 'SS', gap: 'P2D' },
+      { uid: '[[note-y]]', reltype: 'FS', gap: 'P0D' }
+    ])
+    // The flat list PM reads stays bare ids, unaffected by the wikilink form.
+    expect(frontmatter?.dependencies).toEqual(['x', 'y'])
+  })
 })
 
 // Phase 1: with TaskNotes installed, PM writes TaskNotes' identifier onto its own
