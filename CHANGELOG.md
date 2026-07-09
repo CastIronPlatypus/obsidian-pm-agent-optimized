@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Gantt zoom control uses Obsidian's native buttons
 - Filter and saved-view buttons match Obsidian's native buttons, with an accent tint when active
 - The time tracking section in the task editor no longer shows a progress bar
+- The kanban card no longer shows a subtask count next to the progress bar
 
 ### Fixed
 
