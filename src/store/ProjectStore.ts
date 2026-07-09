@@ -24,9 +24,11 @@ import {
   updateTaskInTree
 } from './TaskTreeOps'
 import {
-  blockedByUidTarget,
   getTaskNotesConfig,
   isSharedTaskNote,
+  parseBlockedBy,
+  reconcileDependencies,
+  resolveBlockedByUid,
   resolveProjectLinks,
   type TaskNotesConfig
 } from '../integrations/tasknotes'
@@ -564,14 +566,15 @@ export class ProjectStore implements TaskSource {
     const byPath = new Map<string, string>()
     for (const t of taskMap.values()) if (t.filePath) byPath.set(t.filePath, t.id)
 
-    const resolve = (uid: string, sourcePath: string | undefined): string => {
-      if (taskMap.has(uid)) return uid
-      const inner = blockedByUidTarget(uid)
-      if (!inner) return uid
-      if (taskMap.has(inner)) return inner
-      const dest = this.app.metadataCache.getFirstLinkpathDest?.(inner, sourcePath ?? '')
-      return (dest && byPath.get(dest.path)) ?? uid
-    }
+    const resolve = (uid: string, sourcePath: string | undefined): string =>
+      resolveBlockedByUid(
+        uid,
+        (id) => taskMap.has(id),
+        (inner) => {
+          const dest = this.app.metadataCache.getFirstLinkpathDest?.(inner, sourcePath ?? '')
+          return dest ? byPath.get(dest.path) : undefined
+        }
+      )
 
     for (const task of taskMap.values()) {
       if (!task.taskNotesBlockedBy) continue
@@ -583,6 +586,44 @@ export class ProjectStore implements TaskSource {
       }
       task.dependencies = deps
     }
+  }
+
+  /** Resolve a single `blockedBy` uid to a bare task id using a project's index. */
+  private resolveUidInProject(uid: string, project: Project, sourcePath?: string): string {
+    return resolveBlockedByUid(
+      uid,
+      (id) => project.taskIndex.has(id),
+      (inner) => {
+        const dest = this.app.metadataCache.getFirstLinkpathDest?.(inner, sourcePath ?? '')
+        if (!dest) return undefined
+        for (const [id, entry] of project.taskIndex) if (entry.task.filePath === dest.path) return id
+        return undefined
+      }
+    )
+  }
+
+  /**
+   * Reconcile a task's dependencies against the `blockedBy` currently on disk,
+   * just before we rewrite the file. Another editor (TaskNotes) may have added or
+   * removed a blocker since we hydrated; without this, regenerating `blockedBy`
+   * from our stale in-memory copy would resurrect a deleted dependency or drop a
+   * new one. Mirrors the foreign-key re-read on the same save paths. No-op unless
+   * the task carried a `blockedBy` when read.
+   */
+  private reconcileBlockedByFromDisk(task: Task, fm: Record<string, unknown> | null, project: Project): void {
+    if (!task.taskNotesBlockedBy) return
+    const disk = parseBlockedBy(fm?.blockedBy).map((d) => ({
+      ...d,
+      uid: this.resolveUidInProject(d.uid, project, task.filePath)
+    }))
+    const base = task.taskNotesBlockedBy.map((d) => d.uid)
+    task.dependencies = reconcileDependencies(
+      base,
+      disk.map((d) => d.uid),
+      task.dependencies
+    )
+    // Adopt disk's entries (fresh reltype/gap) as the new base for the next save.
+    task.taskNotesBlockedBy = disk
   }
 
   /**
@@ -806,6 +847,7 @@ export class ProjectStore implements TaskSource {
             // Re-read foreign keys off the file: another plugin may have written
             // its own since we hydrated this task, and we're about to wipe the block.
             task.foreign = collectForeign(fm)
+            this.reconcileBlockedByFromDisk(task, fm, project)
             const next = buildTaskFrontmatter(task, project, parentTask, this.taskNotesConfig(), blockedByUid)
             for (const k of Object.keys(fm)) Reflect.deleteProperty(fm, k)
             Object.assign(fm, next)
@@ -830,6 +872,7 @@ export class ProjectStore implements TaskSource {
           }
           // Same reasoning as the fast path: the file's foreign keys win over our copy.
           task.foreign = collectForeign(frontmatter ?? {})
+          this.reconcileBlockedByFromDisk(task, frontmatter, project)
           return serializeTask(
             task,
             project,

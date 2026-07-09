@@ -48,6 +48,49 @@ export function blockedByUidTarget(uid: string): string {
 }
 
 /**
+ * Resolve a `blockedBy` uid to a bare task id. Tries the raw uid as an id, then
+ * its unwrapped link target as an id, then resolves the target as a link via
+ * `resolveLink` (basename/path → id). Returns the original uid when nothing
+ * resolves, so an external reference survives round-trip unchanged.
+ */
+export function resolveBlockedByUid(
+  uid: string,
+  hasId: (id: string) => boolean,
+  resolveLink: (inner: string) => string | undefined
+): string {
+  if (hasId(uid)) return uid
+  const inner = blockedByUidTarget(uid)
+  if (!inner) return uid
+  if (hasId(inner)) return inner
+  return resolveLink(inner) ?? uid
+}
+
+/**
+ * Three-way reconcile of a task's `dependencies[]` when the file's `blockedBy`
+ * changed on disk (e.g. TaskNotes added/removed a blocker) while PM held a stale
+ * copy — run at write time so PM never resurrects a dependency TaskNotes deleted,
+ * nor drops one it added.
+ *   base — uids captured when the task was last read (resolved ids)
+ *   disk — uids currently in the file's `blockedBy` (resolved ids)
+ *   deps — PM's current in-memory `dependencies[]`
+ * An entry TaskNotes removed (in base, gone from disk) drops out of deps; one it
+ * added (new on disk) joins; every other id stays under PM's control. Order
+ * follows deps, with TaskNotes' additions appended.
+ */
+export function reconcileDependencies(
+  base: readonly string[],
+  disk: readonly string[],
+  deps: readonly string[]
+): string[] {
+  const diskSet = new Set(disk)
+  const baseSet = new Set(base)
+  const removed = new Set(base.filter((id) => !diskSet.has(id)))
+  const out = deps.filter((id) => !removed.has(id))
+  for (const id of disk) if (!baseSet.has(id) && !out.includes(id)) out.push(id)
+  return out
+}
+
+/**
  * Rebuild `blockedBy` from our flat `dependencies[]` and the original entries we
  * captured on read. Walks `dependencies` in order so the result follows PM's list:
  * a uid still present reuses its original entry (preserving `reltype`/`gap`); a uid

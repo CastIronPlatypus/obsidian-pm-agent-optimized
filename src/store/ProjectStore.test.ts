@@ -1169,4 +1169,43 @@ describe('TaskNotes blockedBy uid resolution (Phase 4)', () => {
     const beta = expectDefined(findTask(reloaded.tasks, b.id))
     expect(beta.dependencies).toEqual([a.id]) // deduped to a single dependency
   })
+
+  it('does not resurrect a blocker TaskNotes deleted while PM held a stale copy', async () => {
+    const { vault, newStore } = cachedApp()
+    const setup = newStore()
+    const project = await setup.createProject('Interop', 'Projects')
+    const a = await addNamed(setup, project, 'Alpha')
+    const c = await addNamed(setup, project, 'Gamma')
+    const b = await addNamed(setup, project, 'Beta')
+    const aBase = expectDefined(a.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    const cBase = expectDefined(c.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    const bPath = expectDefined(b.filePath)
+
+    // Beta blocked by Alpha and Gamma, written as TaskNotes wikilinks.
+    await vault.process(fileAt(vault, bPath), (content) =>
+      content.replace(
+        /^---\n/,
+        `---\nblockedBy:\n  - uid: "[[${aBase}]]"\n    reltype: "SS"\n  - uid: "[[${cBase}]]"\n    reltype: "FS"\n`
+      )
+    )
+
+    // PM loads and holds both blockers in memory (stale copy).
+    const store = newStore()
+    const reloaded = expectDefined(await store.loadProject(fileAt(vault, project.filePath)))
+    expect(expectDefined(findTask(reloaded.tasks, b.id)).dependencies).toEqual([a.id, c.id])
+
+    // TaskNotes deletes the Gamma blocker behind PM's back — file now lists Alpha only.
+    await vault.process(fileAt(vault, bPath), (content) =>
+      content.replace(new RegExp(`\\n  - uid: "\\[\\[${cBase}\\]\\]"\\n    reltype: "FS"`), '')
+    )
+
+    // A PM save of an unrelated field must not write Gamma back.
+    await store.updateTask(reloaded, b.id, { status: 'in-progress' })
+
+    const content = await vault.cachedRead(fileAt(vault, bPath))
+    expect(content).toContain(`uid: "[[${aBase}]]"`)
+    expect(content).not.toContain(cBase) // Gamma stays deleted
+    expect(content).toContain(`dependencies: ["${a.id}"]`)
+    expect(expectDefined(findTask(reloaded.tasks, b.id)).dependencies).toEqual([a.id])
+  })
 })
