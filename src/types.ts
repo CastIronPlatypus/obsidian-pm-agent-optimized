@@ -22,6 +22,21 @@ export interface TimeLog {
   note: string
 }
 
+/**
+ * A TaskNotes-style time-tracking session: precise ISO start/end timestamps
+ * rather than PM's per-day hour aggregate (`TimeLog`). `endTime` absent = the
+ * session is still running. Canonical only when `taskNotesTimeSync` is on; PM
+ * derives hours from these for its own UI. See `converge-time-tracking` task.
+ */
+export interface TimeEntry {
+  startTime: string // ISO 8601 datetime
+  endTime?: string // ISO 8601 datetime; absent = running
+  description: string
+}
+
+/** PM stores estimates in hours; TaskNotes in minutes. Convert across the bridge. */
+export const MINUTES_PER_HOUR = 60
+
 export interface CustomFieldDef {
   id: string
   name: string
@@ -48,6 +63,11 @@ export interface Task {
   recurrence?: Recurrence
   timeEstimate?: number // hours
   timeLogs?: TimeLog[]
+  /**
+   * TaskNotes-style time sessions, only populated when `taskNotesTimeSync` is on.
+   * When present these are the canonical time record and `timeLogs` is unused.
+   */
+  timeEntries?: TimeEntry[]
   customFields: Record<string, unknown>
   /**
    * Frontmatter keys written by another plugin (TaskNotes) or by the user, kept
@@ -199,6 +219,14 @@ export interface PMSettings {
    */
   taskNotesInterop: boolean
   /**
+   * Adopt TaskNotes' time-tracking shape: `timeEntries` sessions and minute-based
+   * `timeEstimate` become canonical, read/written by PM and derived to hours for
+   * its UI. Off (default) = PM keeps its own `timeLogs` + hours, and a co-installed
+   * TaskNotes file's `timeEntries` stays untouched in `foreign`. Only meaningful
+   * with `taskNotesInterop` on. See the `converge-time-tracking` task.
+   */
+  taskNotesTimeSync: boolean
+  /**
    * Snapshots taken when the user aligns PM's vocabulary with TaskNotes, so each
    * alignment is exactly reversible. All options here are config-only — they
    * touch settings, never task files. See `integrations/tasknotesAlignment.ts`.
@@ -243,6 +271,7 @@ export const DEFAULT_SETTINGS: PMSettings = {
   autoSchedule: true,
   saveTaskOnClose: true,
   taskNotesInterop: true,
+  taskNotesTimeSync: false,
   taskNotesAlignment: {},
   projectFilters: {},
   collapsedTasks: {}

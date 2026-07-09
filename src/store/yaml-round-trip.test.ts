@@ -231,6 +231,67 @@ describe('foreign frontmatter round-trip', () => {
     expect(task.foreign?.timeEstimate).toBeUndefined()
   })
 
+  it('leaves TaskNotes timeEntries in foreign when time sync is off', () => {
+    const fm: Record<string, unknown> = {
+      title: 'TaskNotes task',
+      tags: ['task'],
+      timeEntries: [{ startTime: '2026-07-10T09:00:00Z', endTime: '2026-07-10T10:30:00Z', description: 'design' }]
+    }
+    const { task } = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/entries.md')
+    expect(task.timeEntries).toBeUndefined()
+    expect(task.foreign?.timeEntries).toEqual(fm.timeEntries)
+
+    // Round-trips verbatim through foreign — PM never rewrites it with sync off.
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.timeEntries).toEqual(fm.timeEntries)
+    expect(frontmatter?.timeLogs).toBeUndefined()
+  })
+
+  it('reads timeEntries sessions into the typed model when time sync is on', () => {
+    const fm: Record<string, unknown> = {
+      title: 'TaskNotes task',
+      tags: ['task'],
+      timeEntries: [
+        { startTime: '2026-07-10T09:00:00Z', endTime: '2026-07-10T10:30:00Z', description: 'design' },
+        { startTime: '2026-07-10T11:00:00Z', description: 'running' } // no endTime = in progress
+      ]
+    }
+    const { task } = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/entries.md', false, true)
+    expect(task.timeEntries).toEqual([
+      { startTime: '2026-07-10T09:00:00Z', endTime: '2026-07-10T10:30:00Z', description: 'design' },
+      { startTime: '2026-07-10T11:00:00Z', description: 'running' }
+    ])
+    // Owned now, so it must not also linger in foreign (would double-write on save).
+    expect(task.foreign?.timeEntries).toBeUndefined()
+  })
+
+  it('converts timeEstimate minutes to hours on read and back to minutes on write when sync is on', () => {
+    const fm: Record<string, unknown> = { title: 'TaskNotes task', tags: ['task'], timeEstimate: 90 }
+    const { task } = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/est.md', false, true)
+    expect(task.timeEstimate).toBe(1.5) // 90 min → 1.5 h
+
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null, [], null, undefined, true)
+    const { frontmatter } = parseFrontmatter(md)
+    expect(frontmatter?.timeEstimate).toBe(90) // 1.5 h → 90 min
+  })
+
+  it('writes timeEntries (not timeLogs) when sync is on and round-trips them', () => {
+    const task = makeTask({
+      id: 't-sync',
+      title: 'PM task',
+      timeEntries: [{ startTime: '2026-07-10T09:00:00Z', endTime: '2026-07-10T10:00:00Z', description: 'work' }]
+    })
+    const md = serializeTask(task, makeProject('Test', 'Projects/Test.md'), null, [], null, undefined, true)
+    const { frontmatter, body } = parseFrontmatter(md)
+    if (!frontmatter) throw new Error('frontmatter missing')
+    expect(frontmatter.timeEntries).toEqual(task.timeEntries)
+    expect(frontmatter.timeLogs).toBeUndefined()
+
+    const { task: reread } = hydrateTaskFromFile(frontmatter, body, 'Projects/Test_tasks/sync.md', false, true)
+    expect(reread.timeEntries).toEqual(task.timeEntries)
+  })
+
   it('keeps a string recurrence foreign rather than coercing it into our object shape', () => {
     const { task } = hydrateTaskFromFile({ id: 't-rec', recurrence: 'FREQ=DAILY' }, '', 'Projects/Test_tasks/rec.md')
     expect(task.recurrence).toBeUndefined()
