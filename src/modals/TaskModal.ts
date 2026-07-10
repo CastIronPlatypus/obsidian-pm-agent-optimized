@@ -503,7 +503,8 @@ export class TaskModal extends Modal {
     renderSubtasksPanel(body, this.task, this.plugin, this.plugin.store.configFor(this.project).statuses)
 
     // ── Time tracking ─────────────────────────────────────────────────────────
-    renderTimeTrackingPanel(body, this.task)
+    const timeSync = this.plugin.settings.taskNotesInterop && this.plugin.settings.taskNotesTimeSync
+    renderTimeTrackingPanel(body, this.task, timeSync)
 
     // ── Footer ──────────────────────────────────────────────────────────────
     const footer = contentEl.createDiv('pm-te-footer')

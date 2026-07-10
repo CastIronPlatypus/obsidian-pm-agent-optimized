@@ -23,6 +23,34 @@ export function formatDate(iso: string): string {
   return d ? d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''
 }
 
+/**
+ * Convert an ISO instant (as stored in `TimeEntry`) to a value for a
+ * `datetime-local` input: the local wall-clock time at minute precision
+ * (`YYYY-MM-DDTHH:mm`). Empty string for empty/unparseable input.
+ */
+export function isoToLocalInput(iso: string): string {
+  if (!iso) return ''
+  try {
+    const zdt = Temporal.Instant.from(iso).toZonedDateTimeISO(Temporal.Now.timeZoneId())
+    return zdt.toPlainDateTime().toString({ smallestUnit: 'minute' })
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Convert a `datetime-local` input value (local wall time, no zone) back to an
+ * ISO instant string in UTC (`…Z`). Empty string for empty/unparseable input.
+ */
+export function localInputToIso(value: string): string {
+  if (!value) return ''
+  try {
+    return Temporal.PlainDateTime.from(value).toZonedDateTime(Temporal.Now.timeZoneId()).toInstant().toString()
+  } catch {
+    return ''
+  }
+}
+
 export type DueTone = 'overdue' | 'today' | 'soon'
 
 /**

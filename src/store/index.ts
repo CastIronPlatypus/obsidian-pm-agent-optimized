@@ -30,6 +30,7 @@ export {
   findTask,
   flattenTasks,
   moveTaskInTree,
+  totalEntriesHours,
   totalLoggedHours,
   updateTaskInTree
 } from './TaskTreeOps'

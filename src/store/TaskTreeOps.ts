@@ -1,5 +1,6 @@
 import type { Task } from '../types'
 import { makeId } from '../types'
+import { Temporal } from '../dates'
 
 /** Flatten a task tree into a list, preserving depth info */
 export interface FlatTask {
@@ -164,8 +165,37 @@ export function collectAllTags(tasks: Task[]): string[] {
   return [...set].filter(Boolean).sort()
 }
 
-/** Sum all logged hours for a task */
+/** Sum all logged hours for a task (PM's `timeLogs` shape) */
 export function totalLoggedHours(task: Task): number {
   if (!task.timeLogs?.length) return 0
   return task.timeLogs.reduce((sum, log) => sum + log.hours, 0)
+}
+
+/**
+ * Sum session hours from `timeEntries` (TaskNotes shape, used when time sync is
+ * on). A running entry — one with no `endTime` — counts up to `now`. Rounded to
+ * two decimals for display. `now` is injectable so results stay deterministic.
+ */
+export function totalEntriesHours(task: Task, now: Temporal.Instant = Temporal.Now.instant()): number {
+  if (!task.timeEntries?.length) return 0
+  let seconds = 0
+  for (const entry of task.timeEntries) {
+    let start: Temporal.Instant
+    try {
+      start = Temporal.Instant.from(entry.startTime)
+    } catch {
+      continue
+    }
+    let end = now
+    if (entry.endTime) {
+      try {
+        end = Temporal.Instant.from(entry.endTime)
+      } catch {
+        continue
+      }
+    }
+    const s = start.until(end).total('second')
+    if (s > 0) seconds += s
+  }
+  return Math.round((seconds / 3600) * 100) / 100
 }

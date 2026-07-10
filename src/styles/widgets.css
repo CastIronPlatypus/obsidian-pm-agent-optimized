@@ -77,6 +77,36 @@
   flex: 1;
 }
 
+/* -- Time tracking sessions (TaskNotes shape) ---------------------------- */
+.pm-time-session-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 6px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+}
+.pm-time-session-start,
+.pm-time-session-end {
+  width: 160px;
+}
+.pm-time-session-sep {
+  color: var(--text-muted);
+}
+.pm-time-session-running {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-green);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pm-time-session-desc {
+  flex: 1;
+  min-width: 120px;
+}
+
 /* -- Kanban title row ---------------------------------------------------- */
 .pm-kanban-card-title-row {
   display: flex;

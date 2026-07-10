@@ -9,9 +9,11 @@ import {
   findTask,
   flattenTasks,
   moveTaskInTree,
+  totalEntriesHours,
   totalLoggedHours,
   updateTaskInTree
 } from './TaskTreeOps'
+import { Temporal } from '../dates'
 
 function task(overrides: Partial<Task> & { id: string }): Task {
   return makeTask(overrides)
@@ -211,5 +213,43 @@ describe('totalLoggedHours', () => {
       ]
     })
     expect(totalLoggedHours(t)).toBe(5.5)
+  })
+})
+
+describe('totalEntriesHours', () => {
+  it('returns 0 when no entries exist', () => {
+    expect(totalEntriesHours(task({ id: 'a' }))).toBe(0)
+  })
+
+  it('sums completed sessions (end − start) across entries', () => {
+    const t = task({
+      id: 'a',
+      timeEntries: [
+        { startTime: '2026-07-10T09:00:00Z', endTime: '2026-07-10T10:30:00Z', description: '' },
+        { startTime: '2026-07-10T12:00:00Z', endTime: '2026-07-10T13:00:00Z', description: '' }
+      ]
+    })
+    expect(totalEntriesHours(t)).toBe(2.5)
+  })
+
+  it('counts a running entry (no endTime) up to now', () => {
+    const now = Temporal.Instant.from('2026-07-10T11:00:00Z')
+    const t = task({
+      id: 'a',
+      timeEntries: [{ startTime: '2026-07-10T09:00:00Z', description: '' }]
+    })
+    expect(totalEntriesHours(t, now)).toBe(2)
+  })
+
+  it('ignores unparseable or negative-duration entries', () => {
+    const t = task({
+      id: 'a',
+      timeEntries: [
+        { startTime: 'not-a-date', endTime: '2026-07-10T10:00:00Z', description: '' },
+        { startTime: '2026-07-10T11:00:00Z', endTime: '2026-07-10T10:00:00Z', description: '' },
+        { startTime: '2026-07-10T09:00:00Z', endTime: '2026-07-10T10:00:00Z', description: '' }
+      ]
+    })
+    expect(totalEntriesHours(t)).toBe(1)
   })
 })
