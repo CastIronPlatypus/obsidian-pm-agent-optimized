@@ -31,6 +31,7 @@ import {
   reconcileSharedField,
   resolveBlockedByUid,
   resolveProjectLinks,
+  resolveTaskNotesRef,
   TASKNOTES_SHARED_FIELDS,
   type TaskNotesConfig
 } from '../integrations/tasknotes'
@@ -544,10 +545,18 @@ export class ProjectStore implements TaskSource {
       )
     }
 
+    // TaskNotes-created subtasks nest via a `projects[]` link to the parent task
+    // note, not our `parentId`/`subtaskIds`. Resolve those after the explicit
+    // relationships above so a real parentId always wins.
+    this.linkTaskNotesSubtasks(taskMap, childIds)
+
     const result: Task[] = []
     const pushed = new Set<string>()
     for (const id of topLevelIds) {
       if (pushed.has(id)) continue
+      // A subtask can linger in the project's `taskIds` from before it was nested
+      // (or from a stale write). Never surface it at top level — it's a child now.
+      if (childIds.has(id)) continue
       const task = taskMap.get(id)
       if (task) {
         result.push(task)
@@ -596,6 +605,51 @@ export class ProjectStore implements TaskSource {
         if (!deps.includes(id)) deps.push(id)
       }
       task.dependencies = deps
+    }
+  }
+
+  /**
+   * Nest TaskNotes-created subtasks. TaskNotes models a subtask as a note whose
+   * `projects[]` links to the *parent task note* (alongside the real project
+   * link), rather than via our `parentId`/`subtaskIds`. For every task still at
+   * top level, resolve its (foreign) `projects[]` entries: one that lands on
+   * another task in this project's map is its parent. Runs after the explicit
+   * subtaskIds/parentId nesting so a real relationship always wins, and updates
+   * `childIds`/`subtaskIdsMap` so the nested task drops out of the top level.
+   * No-op when interop is off — no task carries a foreign `projects` then.
+   */
+  private linkTaskNotesSubtasks(taskMap: Map<string, Task>, childIds: Set<string>): void {
+    if (!this.taskNotesConfig()) return
+    const byPath = new Map<string, string>()
+    for (const t of taskMap.values()) if (t.filePath) byPath.set(t.filePath, t.id)
+
+    for (const task of taskMap.values()) {
+      if (childIds.has(task.id)) continue
+      const projects = task.foreign?.projects
+      if (!Array.isArray(projects)) continue
+
+      let parentId: string | undefined
+      for (const ref of projects) {
+        if (typeof ref !== 'string') continue
+        const path = resolveTaskNotesRef(this.app, ref, task.filePath ?? '')
+        const candidate = path ? byPath.get(path) : undefined
+        if (candidate && candidate !== task.id) {
+          parentId = candidate
+          break
+        }
+      }
+      if (parentId === undefined) continue
+
+      const parent = taskMap.get(parentId)
+      if (!parent) continue
+      // Guard against a mutual/descendant link forming a cycle.
+      if (flattenTasks(task.subtasks).some((f) => f.task.id === parentId)) continue
+
+      parent.subtasks.push(task)
+      // The projects[] link owns this relationship; mark it so save never bakes it
+      // into our subtaskIds/parentId (which would survive the link's later removal).
+      task.viaTaskNotes = true
+      childIds.add(task.id)
     }
   }
 

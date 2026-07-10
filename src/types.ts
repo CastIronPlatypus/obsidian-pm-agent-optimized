@@ -101,6 +101,14 @@ export interface Task {
    * path to leave the file where it is rather than relocate it into `_tasks/`.
    */
   external?: boolean
+  /**
+   * Runtime only — true when this task is nested under its parent purely via a
+   * TaskNotes `projects[]` link (not our `subtaskIds`/`parentId`). That link is the
+   * single source of truth for the relationship, so we must never bake it into our
+   * own fields: the parent omits it from `subtaskIds`/`## Subtasks`, and the child's
+   * `parentId` isn't written. Removing the link in TaskNotes then detaches it here.
+   */
+  viaTaskNotes?: boolean
 }
 
 export interface Project {

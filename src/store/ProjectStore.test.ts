@@ -1092,6 +1092,41 @@ describe('cross-folder TaskNotes ingestion (Phase 3b)', () => {
     expect(content).toContain('tags: ["task"]') // TaskNotes tag marker preserved
   })
 
+  it('nests a TaskNotes subtask that links to the parent task in projects[]', async () => {
+    const { vault, newStore } = taskNotesApp()
+    const store = newStore()
+    const project = await store.createProject('Refactoring', 'Projects')
+    const parent = await addNamed(store, project, 'The parent')
+    const parentBase = expectDefined(parent.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+
+    // TaskNotes models a subtask as a note whose projects[] links BOTH the project
+    // and the parent task note.
+    await vault.create(
+      'TaskNotes/Tasks/child.md',
+      [
+        '---',
+        'tags:',
+        '  - task',
+        'projects:',
+        '  - "[[Refactoring]]"',
+        `  - "[[${parentBase}]]"`,
+        'id: tn-child',
+        'title: TaskNotes child',
+        'status: todo',
+        '---',
+        '',
+        'body'
+      ].join('\n')
+    )
+
+    const [loaded] = await newStore().loadAllProjects('Projects')
+    // Not surfaced at top level — it's a child now...
+    expect(loaded.tasks.some((t) => t.id === 'tn-child')).toBe(false)
+    // ...nested under the parent it linked.
+    const p = expectDefined(findTask(loaded.tasks, parent.id))
+    expect(p.subtasks.some((s) => s.id === 'tn-child')).toBe(true)
+  })
+
   it('ignores shared notes when interop is off', async () => {
     const { app, vault } = taskNotesApp()
     const offSettings: PMSettings = { ...SETTINGS, taskNotesInterop: false }
