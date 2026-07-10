@@ -195,6 +195,13 @@ export interface TaskNotesAlignment {
   fieldMapping?: { appliedAt: string; prev: Record<string, string> }
   /** Prior value of TaskNotes' storeTitleInFilename, before we turned it off. */
   titleStorage?: { appliedAt: string; prev: boolean }
+  /**
+   * When the one-shot time-shape migration ran. Unlike the other alignments this
+   * one rewrites task files (`timeLogs`→`timeEntries`, hours→minutes) and is
+   * one-way, so there's no `prev` — the `appliedAt` stamp only guards against a
+   * second run doubling the estimates.
+   */
+  timeSync?: { appliedAt: string }
 }
 
 export interface PMSettings {

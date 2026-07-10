@@ -18,7 +18,9 @@ import {
   statusesDiverge,
   titleStorageDiverges
 } from './integrations/tasknotesAlignment'
+import { runTimeSyncMigration } from './integrations/timeSyncMigration'
 import { flattenTasks } from './store/TaskTreeOps'
+import { confirmDialog } from './ui/ModalFactory'
 import { renderPriorityListEditor, renderStatusListEditor } from './ui/PaletteListEditor'
 import { IconButton } from './ui/primitives/IconButton'
 
@@ -153,7 +155,10 @@ export class PMSettingTab extends PluginSettingTab {
           })
         )
 
-      if (this.plugin.settings.taskNotesInterop) this.renderTaskNotesAlignment(containerEl)
+      if (this.plugin.settings.taskNotesInterop) {
+        this.renderTimeSyncToggle(containerEl)
+        this.renderTaskNotesAlignment(containerEl)
+      }
     }
 
     // ── Notifications ─────────────────────────────────────────────────────────
@@ -273,6 +278,47 @@ export class PMSettingTab extends PluginSettingTab {
           this.renderPriorityList(priorityContainer)
         })
     )
+  }
+
+  /**
+   * The time-sync toggle. Unlike the alignment rows below it, flipping this on
+   * rewrites task files (`timeLogs`→`timeEntries`, hours→minutes) — so it can't
+   * reuse the "no files touched" alignment affordance and carries its own confirm.
+   * One-way: turning it back off just stops syncing.
+   */
+  private renderTimeSyncToggle(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName('Sync time tracking with TaskNotes')
+      .setDesc(
+        "Adopt TaskNotes' time-entry sessions and minute-based estimates so timers sync both ways. Rewrites existing time logs once — reversible from here."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.taskNotesTimeSync).onChange(async (v) => {
+          if (v) {
+            const ok = await confirmDialog(
+              this.app,
+              "Rewrites PM time logs to TaskNotes sessions; undo won't restore exact hours-per-day. Continue?",
+              'Continue'
+            )
+            if (!ok) {
+              t.setValue(false)
+              return
+            }
+            this.plugin.settings.taskNotesTimeSync = true
+            const migrated = await runTimeSyncMigration(this.app, this.plugin.settings)
+            await this.plugin.saveSettings()
+            this.plugin.refreshProjectViews()
+            new Notice(
+              `Time tracking synced with TaskNotes${migrated ? ` — migrated ${migrated} task${migrated === 1 ? '' : 's'}` : ''}.`
+            )
+          } else {
+            this.plugin.settings.taskNotesTimeSync = false
+            await this.plugin.saveSettings()
+            this.plugin.refreshProjectViews()
+          }
+          this.display()
+        })
+      )
   }
 
   private renderTaskNotesAlignment(containerEl: HTMLElement): void {
