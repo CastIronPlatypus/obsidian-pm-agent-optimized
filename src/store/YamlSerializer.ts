@@ -94,7 +94,9 @@ export function buildTaskFrontmatter(
     progress: task.progress,
     assignees: task.assignees,
     tags: task.tags,
-    subtaskIds: task.subtasks.map((s) => s.id),
+    // A child nested purely via a TaskNotes projects[] link is not ours to record:
+    // baking it here would resurrect the relationship after the link is removed.
+    subtaskIds: task.subtasks.filter((s) => !s.viaTaskNotes).map((s) => s.id),
     dependencies: task.dependencies,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt
@@ -167,10 +169,13 @@ export function serializeTask(
     yamlLines.push(`Project: [[${noteBasename(project.filePath)}|${project.title}]]`)
   }
 
-  if (task.subtasks.length) {
+  // TaskNotes-linked children are excluded from our subtaskIds (see buildTaskFrontmatter);
+  // keep the body list in step so the two representations can't drift.
+  const ownSubtasks = task.subtasks.filter((s) => !s.viaTaskNotes)
+  if (ownSubtasks.length) {
     yamlLines.push('')
     yamlLines.push('## Subtasks')
-    for (const sub of task.subtasks) {
+    for (const sub of ownSubtasks) {
       const subBasename = sub.filePath ? noteBasename(sub.filePath) : taskSlug(sub.title)
       const check = isTerminalStatus(sub.status, statuses) ? 'x' : ' '
       yamlLines.push(`- [${check}] [[${subBasename}|${sub.title}]]`)

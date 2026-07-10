@@ -929,10 +929,13 @@ export class ProjectStore implements TaskSource {
   private async saveTaskFile(
     task: Task,
     project: Project,
-    parentTask: Task | null,
+    parentTaskArg: Task | null,
     folder: string,
     kind: DirtyKind
   ): Promise<void> {
+    // A TaskNotes-linked child owns its parentage through its projects[] link, not
+    // our parentId — write it as a project-level note so we never bake the relation.
+    const parentTask = task.viaTaskNotes ? null : parentTaskArg
     const previousPath = task.filePath
     const filePath = normalizePath(resolveTaskPath(task, folder, previousPath))
     const renamed = previousPath !== undefined && previousPath !== filePath

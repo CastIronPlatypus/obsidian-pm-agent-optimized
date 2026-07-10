@@ -1127,6 +1127,65 @@ describe('cross-folder TaskNotes ingestion (Phase 3b)', () => {
     expect(p.subtasks.some((s) => s.id === 'tn-child')).toBe(true)
   })
 
+  const childNote = (links: string[]): string =>
+    [
+      '---',
+      'tags:',
+      '  - task',
+      'projects:',
+      ...links.map((l) => `  - "${l}"`),
+      'id: tn-child',
+      'title: TaskNotes child',
+      'status: todo',
+      '---',
+      '',
+      'body'
+    ].join('\n')
+
+  it('does not bake a TaskNotes subtask link into our subtaskIds/parentId', async () => {
+    const { vault, newStore } = taskNotesApp()
+    const store = newStore()
+    const project = await store.createProject('Refactoring', 'Projects')
+    const parent = await addNamed(store, project, 'The parent')
+    const parentBase = expectDefined(parent.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    await vault.create('TaskNotes/Tasks/child.md', childNote(['[[Refactoring]]', `[[${parentBase}]]`]))
+
+    // Load (nests the child), then save both the parent and the child — neither
+    // side may bake the relationship into our own fields.
+    const store2 = newStore()
+    const [loaded] = await store2.loadAllProjects('Projects')
+    await store2.updateTask(loaded, parent.id, { title: 'The parent' })
+    await store2.updateTask(loaded, 'tn-child', { status: 'in-progress' })
+
+    const parentContent = await vault.read(expectDefined(vault.getFileByPath(expectDefined(parent.filePath))))
+    expect(parentContent).not.toContain('tn-child')
+    expect(parentContent).not.toContain('## Subtasks')
+    const childContent = await vault.read(expectDefined(vault.getFileByPath('TaskNotes/Tasks/child.md')))
+    expect(childContent).not.toContain(parent.id) // our parentId never written
+    expect(childContent).toContain(`[[${parentBase}]]`) // TaskNotes' link preserved
+  })
+
+  it('detaches a subtask to top level once its TaskNotes parent link is removed', async () => {
+    const { vault, newStore } = taskNotesApp()
+    const store = newStore()
+    const project = await store.createProject('Refactoring', 'Projects')
+    const parent = await addNamed(store, project, 'The parent')
+    const parentBase = expectDefined(parent.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    const child = await vault.create('TaskNotes/Tasks/child.md', childNote(['[[Refactoring]]', `[[${parentBase}]]`]))
+
+    // Nested while the link is present.
+    const [withLink] = await newStore().loadAllProjects('Projects')
+    expect(expectDefined(findTask(withLink.tasks, parent.id)).subtasks.some((s) => s.id === 'tn-child')).toBe(true)
+    expect(withLink.tasks.some((t) => t.id === 'tn-child')).toBe(false)
+
+    // TaskNotes removes the parent link (the note still belongs to the project).
+    await vault.modify(child, childNote(['[[Refactoring]]']))
+
+    const [detached] = await newStore().loadAllProjects('Projects')
+    expect(expectDefined(findTask(detached.tasks, parent.id)).subtasks.some((s) => s.id === 'tn-child')).toBe(false)
+    expect(detached.tasks.some((t) => t.id === 'tn-child')).toBe(true) // back at top level
+  })
+
   it('ignores shared notes when interop is off', async () => {
     const { app, vault } = taskNotesApp()
     const offSettings: PMSettings = { ...SETTINGS, taskNotesInterop: false }
