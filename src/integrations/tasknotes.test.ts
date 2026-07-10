@@ -7,6 +7,7 @@ import {
   isSharedTaskNote,
   isTaskNotesInstalled,
   mergeProjectLink,
+  reconcileSharedField,
   resolveProjectLinks,
   resolveTaskNotesRef,
   stampTaskNotesMarker,
@@ -236,5 +237,32 @@ describe('mergeProjectLink', () => {
 
   it('drops non-string entries while preserving strings', () => {
     expect(mergeProjectLink(['[[Other]]', 42], 'Refactoring')).toEqual(['[[Other]]', '[[Refactoring]]'])
+  })
+})
+
+describe('reconcileSharedField', () => {
+  it('adopts the disk value when PM did not change the field', () => {
+    // base = mem = 'low', TaskNotes wrote 'high' on disk
+    expect(reconcileSharedField('low', 'high', 'low')).toBe('high')
+  })
+
+  it('keeps PM value when PM changed the field (mem != base)', () => {
+    expect(reconcileSharedField('low', 'high', 'critical')).toBe('critical')
+  })
+
+  it('keeps PM value when disk is unchanged', () => {
+    expect(reconcileSharedField('low', 'low', 'low')).toBe('low')
+  })
+
+  it('keeps PM value when the field is absent on disk', () => {
+    expect(reconcileSharedField('low', undefined, 'low')).toBe('low')
+  })
+
+  it('keeps PM value when no base was captured', () => {
+    expect(reconcileSharedField(undefined, 'high', 'low')).toBe('low')
+  })
+
+  it('adopts a newly-set disk value over an unset PM field', () => {
+    expect(reconcileSharedField('', '2026-08-01', '')).toBe('2026-08-01')
   })
 })

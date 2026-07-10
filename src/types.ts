@@ -82,6 +82,13 @@ export interface Task {
    * only present when the file carried a parseable `blockedBy`.
    */
   taskNotesBlockedBy?: TaskNotesDependency[]
+  /**
+   * Read-time snapshot of the PM-owned fields TaskNotes also writes (`status`,
+   * `priority`, `due`, `start`). Runtime only, only captured when interop is on.
+   * Lets a save reconcile each field three-way — base vs disk vs memory — so PM
+   * never clobbers a value TaskNotes changed on a field PM itself didn't edit.
+   */
+  taskNotesBase?: Record<string, unknown>
   /** UI state, persisted per project in plugin settings (data.json), not in frontmatter. */
   collapsed: boolean
   createdAt: string

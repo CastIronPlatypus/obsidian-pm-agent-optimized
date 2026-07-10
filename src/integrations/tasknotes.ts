@@ -114,6 +114,30 @@ export function mergeBlockedBy(
 }
 
 /**
+ * PM-owned scalar fields that TaskNotes also writes to frontmatter, and so can
+ * change under PM while it holds a stale copy. Reconciled from disk on save (see
+ * `reconcileSharedField`) so PM's write doesn't clobber a TaskNotes edit. `title`
+ * is excluded — it has its own `storeTitleInFilename` handling and drives renames.
+ */
+export const TASKNOTES_SHARED_FIELDS = ['status', 'priority', 'due', 'start'] as const
+
+/**
+ * Three-way reconcile of one shared scalar field on save:
+ *   base — value captured when the task was last read
+ *   disk — value currently in the file (TaskNotes may have changed it)
+ *   mem  — PM's current in-memory value
+ * PM only wins for a field it actually changed (mem ≠ base); otherwise the disk
+ * value wins, so an external edit survives PM's next write. With no base captured
+ * (interop was off at read, or a brand-new task) PM's value stands.
+ */
+export function reconcileSharedField(base: unknown, disk: unknown, mem: unknown): unknown {
+  if (base === undefined) return mem
+  if (!Object.is(mem, base)) return mem
+  if (disk === undefined) return mem
+  return disk
+}
+
+/**
  * The slice of TaskNotes' plugin instance we touch: its persisted `settings`
  * object and its `saveSettings` writer. Both are optional — we probe defensively
  * so a TaskNotes shape change can't throw inside PM.

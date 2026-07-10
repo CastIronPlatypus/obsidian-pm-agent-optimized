@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The import dialog offered the built-in statuses and priorities instead of the configured ones
 - Editing a task no longer discards frontmatter written by other plugins (such as TaskNotes) — unknown properties are now preserved when a task file is saved
+- With TaskNotes installed, a task's priority, status, due, or start date changed in TaskNotes is no longer overwritten the next time this plugin saves the task — each field is reconciled against the file, so an edit made in TaskNotes survives unless you changed the same field here ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 
 ## [1.8.0] - 2026-07-03
 

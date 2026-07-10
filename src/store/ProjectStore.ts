@@ -28,8 +28,10 @@ import {
   isSharedTaskNote,
   parseBlockedBy,
   reconcileDependencies,
+  reconcileSharedField,
   resolveBlockedByUid,
   resolveProjectLinks,
+  TASKNOTES_SHARED_FIELDS,
   type TaskNotesConfig
 } from '../integrations/tasknotes'
 import { collectForeign, hydrateProjectFromFrontmatter, hydrateTaskFromFile, hydrateTasks } from './YamlHydrator'
@@ -636,6 +638,37 @@ export class ProjectStore implements TaskSource {
   }
 
   /**
+   * Snapshot the PM-owned fields TaskNotes also writes, so a later save can tell
+   * a field PM edited from one TaskNotes changed underneath it. Called on read
+   * only when interop is on.
+   */
+  private captureSharedBase(task: Task): void {
+    const base: Record<string, unknown> = {}
+    for (const key of TASKNOTES_SHARED_FIELDS) base[key] = task[key]
+    task.taskNotesBase = base
+  }
+
+  /**
+   * Reconcile the PM-owned shared fields against the values currently on disk,
+   * just before we rewrite the file. TaskNotes may have changed `priority` /
+   * `status` / `due` / `start` since we hydrated; our full-block rewrite would
+   * otherwise clobber that edit with our stale copy. Per field, PM wins only when
+   * it actually changed the value (memory ≠ base); otherwise the disk value is
+   * adopted. Mirrors the foreign-key re-read on the same save paths. No-op unless
+   * a base was captured (interop was on at read).
+   */
+  private reconcileSharedFieldsFromDisk(task: Task, fm: Record<string, unknown> | null): void {
+    const base = task.taskNotesBase
+    if (!base || !fm) return
+    const writable = task as unknown as Record<string, unknown>
+    for (const key of TASKNOTES_SHARED_FIELDS) {
+      const resolved = reconcileSharedField(base[key], fm[key], task[key])
+      writable[key] = resolved
+      base[key] = resolved
+    }
+  }
+
+  /**
    * Maps a bare task id to the `[[note-basename]]` wikilink TaskNotes expects in a
    * `blockedBy` uid. Falls back to the bare id for a task with no file yet or one
    * outside this project's index.
@@ -657,9 +690,12 @@ export class ProjectStore implements TaskSource {
       // read. The description stays empty until loadTaskBody fills it on modal
       // open, or a 'full' save reads it back inline.
       const timeSync = this.timeSyncEnabled()
+      const interop = this.getSettings().taskNotesInterop
       const cached = this.app.metadataCache.getFileCache(file)?.frontmatter
       if (cached && this.isTaskFile(cached, tnConfig)) {
-        return hydrateTaskFromFile(cached, '', file.path, external, timeSync)
+        const result = hydrateTaskFromFile(cached, '', file.path, external, timeSync)
+        if (interop) this.captureSharedBase(result.task)
+        return result
       }
 
       const content = await this.app.vault.cachedRead(file)
@@ -670,6 +706,7 @@ export class ProjectStore implements TaskSource {
 
       const result = hydrateTaskFromFile(frontmatter, body, file.path, external, timeSync)
       this.hydratedBodies.add(result.task)
+      if (interop) this.captureSharedBase(result.task)
       return result
     } catch (e) {
       if (e instanceof Error && e.message.includes('ENOENT')) {
@@ -859,6 +896,7 @@ export class ProjectStore implements TaskSource {
             // its own since we hydrated this task, and we're about to wipe the block.
             task.foreign = collectForeign(fm, undefined, timeSync)
             this.reconcileBlockedByFromDisk(task, fm, project)
+            this.reconcileSharedFieldsFromDisk(task, fm)
             const next = buildTaskFrontmatter(task, project, parentTask, this.taskNotesConfig(), blockedByUid, timeSync)
             for (const k of Object.keys(fm)) Reflect.deleteProperty(fm, k)
             Object.assign(fm, next)
@@ -884,6 +922,7 @@ export class ProjectStore implements TaskSource {
           // Same reasoning as the fast path: the file's foreign keys win over our copy.
           task.foreign = collectForeign(frontmatter ?? {}, undefined, timeSync)
           this.reconcileBlockedByFromDisk(task, frontmatter, project)
+          this.reconcileSharedFieldsFromDisk(task, frontmatter)
           return serializeTask(
             task,
             project,
