@@ -205,6 +205,28 @@ describe('foreign frontmatter round-trip', () => {
     }
   })
 
+  it('assigns a stable derived id to a shared TaskNotes note that has no PM id', () => {
+    // TaskNotes creates a subtask note with no PM `id`. Without a fallback,
+    // `task.id` is undefined, which then serializes as an empty `taskIds` element
+    // in the project file and breaks its YAML with a stray comma.
+    const fm: Record<string, unknown> = {
+      title: 'новая заметка',
+      status: 'in-progress',
+      tags: ['task'],
+      projects: ['[[My lovely project]]']
+    }
+    const a = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/2607107mr.md').task
+    expect(a.id).toBeTruthy()
+    // Deterministic: the same path hydrates to the same id across reloads.
+    const b = hydrateTaskFromFile(fm, '', 'TaskNotes/Tasks/2607107mr.md').task
+    expect(b.id).toBe(a.id)
+    // And it serializes into the project's taskIds without a stray comma.
+    const project = makeProject('Test', 'Projects/Test.md')
+    project.tasks = [a]
+    const { frontmatter } = parseFrontmatter(serializeProject(project))
+    expect(frontmatter?.taskIds).toEqual([a.id])
+  })
+
   it('does not misread a TaskNotes file timeEstimate (minutes) as our hours, and round-trips it', () => {
     // No pm-task marker: this is a TaskNotes-authored task shared in. Its
     // `timeEstimate` is minutes, so we must not read it into our hours field —

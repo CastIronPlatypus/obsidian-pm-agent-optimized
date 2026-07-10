@@ -120,4 +120,13 @@ describe('appendYaml', () => {
     appendYaml(lines, { list: [null, 'a'] }, 0)
     expect(lines).toEqual(['list: [null, "a"]'])
   })
+
+  it('drops undefined array entries so they cannot emit a stray comma', () => {
+    // A shared TaskNotes note with no PM `id` yields `task.id === undefined`, which
+    // once reached `taskIds` and serialized as an empty element (`[..., , ]`),
+    // breaking the project file's YAML. Undefined entries must simply vanish.
+    const lines: string[] = []
+    appendYaml(lines, { taskIds: ['a', undefined, 'b'] }, 0)
+    expect(lines).toEqual(['taskIds: ["a", "b"]'])
+  })
 })

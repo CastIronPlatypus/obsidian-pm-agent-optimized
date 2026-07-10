@@ -99,7 +99,14 @@ export function appendYaml(lines: string[], obj: Record<string, unknown>, indent
           }
         }
       } else {
-        const items = val.map((v) => JSON.stringify(v)).join(', ')
+        // Drop `undefined` entries: `JSON.stringify(undefined)` is the JS value
+        // `undefined`, which `join` renders as an empty element (`[a, , b]`) — an
+        // invalid flow sequence that breaks the whole block. (`null` is kept: it's
+        // a valid YAML scalar that round-trips.)
+        const items = val
+          .filter((v) => v !== undefined)
+          .map((v) => JSON.stringify(v))
+          .join(', ')
         lines.push(`${pad}${key}: [${items}]`)
       }
     } else if (typeof val === 'object') {
