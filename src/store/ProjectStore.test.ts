@@ -61,7 +61,7 @@ describe('ProjectStore self-write tracking', () => {
     expect(store.consumeSelfWrite(expectDefined(task.filePath))).toBe(false) // single-use
   })
 
-  it('marks both old and new path on title rename (modify new, trash old)', async () => {
+  it('marks both old and new path on title rename (renameFile then rewrite)', async () => {
     const { store, vault } = newStore()
     const project = await store.createProject('R', 'Projects')
     const task = await addNamed(store, project, 'Before')
@@ -70,10 +70,27 @@ describe('ProjectStore self-write tracking', () => {
 
     await store.updateTask(project, task.id, { title: 'Renamed' })
 
-    // The new path is created (marked for cache invalidation) and the old
-    // path is trashed (marked so the delete listener skips the reload).
+    // Both paths are marked so the rename event's cache invalidation skips them.
     expect(store.consumeSelfWrite(expectDefined(task.filePath))).toBe(true)
     expect(store.consumeSelfWrite(oldPath)).toBe(true)
+  })
+
+  it('renames via renameFile (moves, not create+trash) so backlinks survive', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Move it', 'Projects')
+    const task = await addNamed(store, project, 'Before')
+    const oldPath = expectDefined(task.filePath)
+    vault.resetCounts()
+
+    await store.updateTask(project, task.id, { title: 'After' })
+
+    const newPath = expectDefined(task.filePath)
+    expect(newPath).not.toBe(oldPath)
+    // The old file was moved, not trashed; the new file was moved-in, not created.
+    expect(vault.trashCount.get(oldPath) ?? 0).toBe(0)
+    expect(vault.createCount.get(newPath) ?? 0).toBe(0)
+    expect(vault.getAbstractFileByPath(oldPath)).toBeNull()
+    expect(vault.getAbstractFileByPath(newPath)).toBeInstanceOf(TFile)
   })
 
   it('treats markers older than the window as stale', async () => {
@@ -132,8 +149,8 @@ describe('ProjectStore dirty-set save efficiency', () => {
 
     await store.updateTask(project, parent.id, { title: 'New parent' })
 
-    // Parent file is renamed (create new + trash old), not modified.
-    expect(vault.modifyCount.get(expectDefined(parent.filePath)) ?? 0).toBe(0)
+    // Parent file is moved to its new path then rewritten in place (one modify).
+    expect(vault.modifyCount.get(expectDefined(parent.filePath))).toBe(1)
     // Children stay at the same path but get rewritten because their Parent link broke.
     expect(vault.modifyCount.get(expectDefined(child1.filePath))).toBe(1)
     expect(vault.modifyCount.get(expectDefined(child2.filePath))).toBe(1)
@@ -166,6 +183,56 @@ describe('ProjectStore dirty-set save efficiency', () => {
 
     expect(vault.trashCount.get(childPath)).toBe(1)
     expect(vault.modifyCount.get(expectDefined(parent.filePath))).toBe(1)
+  })
+})
+
+describe('ProjectStore rename safety', () => {
+  it('does not slug-rename a note PM did not name on a status toggle', async () => {
+    const { store, vault, app } = newStore()
+    const project = await store.createProject('Boiler', 'Projects')
+    // A TaskNotes-style note living inside the tasks folder, named by a human.
+    const humanPath = 'Projects/Boiler_tasks/Fix the boiler.md'
+    await vault.create(
+      humanPath,
+      [
+        '---',
+        'pm-task: true',
+        'id: "boiler-1"',
+        'title: "Fix the boiler"',
+        'status: "todo"',
+        'priority: "medium"',
+        '---',
+        '',
+        'Body.'
+      ].join('\n')
+    )
+
+    // Fresh store so the folder scan picks up the seeded file.
+    const store2 = new ProjectStore(app, () => SETTINGS)
+    const projFile = vault.getAbstractFileByPath(project.filePath)
+    if (!(projFile instanceof TFile)) throw new Error('project file missing')
+    const loaded = expectDefined(await store2.loadProject(projFile))
+    expect(expectDefined(findTask(loaded.tasks, 'boiler-1')).filePath).toBe(humanPath)
+
+    await store2.updateTask(loaded, 'boiler-1', { status: 'done' })
+
+    // The human-named file stays put; PM never coins a slug rename for it.
+    expect(expectDefined(findTask(loaded.tasks, 'boiler-1')).filePath).toBe(humanPath)
+    expect(vault.getAbstractFileByPath(humanPath)).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Projects/Boiler_tasks/fix-the-boiler.md')).toBeNull()
+  })
+
+  it('re-slugs a PM-named file when its title changes', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Slugs', 'Projects')
+    const task = await addNamed(store, project, 'Original')
+    expect(task.filePath).toBe('Projects/Slugs_tasks/original.md')
+
+    await store.updateTask(project, task.id, { title: 'Brand new name' })
+
+    expect(task.filePath).toBe('Projects/Slugs_tasks/brand-new-name.md')
+    expect(vault.getAbstractFileByPath('Projects/Slugs_tasks/original.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Slugs_tasks/brand-new-name.md')).toBeInstanceOf(TFile)
   })
 })
 

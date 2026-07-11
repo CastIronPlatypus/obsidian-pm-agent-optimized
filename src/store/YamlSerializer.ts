@@ -209,7 +209,13 @@ export function noteBasename(filePath: string): string {
 /** Slug length cap, for path-length safety (Windows MAX_PATH, mobile, sync). */
 export const TASK_SLUG_MAX_LENGTH = 60
 
-function taskSlug(title: string): string {
+/**
+ * PM's file-naming scheme: a lowercase, hyphenated, length-capped slug of the
+ * title. Idempotent on its own output, so a basename PM produced is exactly one
+ * for which `taskSlug(basename) === basename` — the test used to tell a
+ * PM-named file apart from a human- or TaskNotes-named one.
+ */
+export function taskSlug(title: string): string {
   return sanitizeFileName(title).toLowerCase().replace(/\s+/g, '-').slice(0, TASK_SLUG_MAX_LENGTH)
 }
 

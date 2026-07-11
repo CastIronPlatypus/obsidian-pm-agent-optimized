@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Editing a task no longer discards frontmatter written by other plugins (such as TaskNotes) — unknown properties are now preserved when a task file is saved
 - With TaskNotes installed, a task's priority, status, due, or start date changed in TaskNotes is no longer overwritten the next time this plugin saves the task — each field is reconciled against the file, so an edit made in TaskNotes survives unless you changed the same field here ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 - With TaskNotes installed, a project's cross-folder external-task index is refreshed when a note's frontmatter is parsed, so a TaskNotes task linked to a project from outside its task folder shows up the next time the project is opened rather than only after a full reload ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
+- Renaming a task file (from a title change) now moves the file so Obsidian updates every wikilink pointing at it, instead of creating a new file and trashing the old one — a subtask's parent link and other tasks' `blockedBy` links to it no longer break until the referring file happens to be re-saved ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
+- A task note you named yourself (e.g. a TaskNotes note titled "Fix the boiler") is no longer slug-renamed to `fix-the-boiler` by a routine edit such as a status change — only files this plugin named are renamed to track the title ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 
 ## [1.8.0] - 2026-07-03
 
