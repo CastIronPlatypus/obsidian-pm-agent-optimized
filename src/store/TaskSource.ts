@@ -26,6 +26,9 @@ export interface TaskSource {
    */
   configFor(project: Project): ResolvedProjectConfig
 
+  /** Drop cached state for a project so the next load re-reads from disk and re-sweeps external tasks. Backs the manual reload action. */
+  invalidateProject(projectPath: string): void
+
   loadAllProjects(folder: string): Promise<Project[]>
   loadProject(file: TFile): Promise<Project | null>
   loadTaskBody(task: Task): Promise<void>

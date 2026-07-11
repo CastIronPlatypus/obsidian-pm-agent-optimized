@@ -404,6 +404,18 @@ export class ProjectStore implements TaskSource {
     return files
   }
 
+  /**
+   * Drop all cached state for a project so the next load re-reads it from disk
+   * and re-sweeps the cross-folder external-task index. Backs the manual reload
+   * action: automatic invalidation can miss a change (e.g. a TaskNotes note whose
+   * `projects[]` link is parsed after the vault event fired), so this is the
+   * user's escape hatch to force a fresh read.
+   */
+  invalidateProject(projectPath: string): void {
+    this.projectCache.delete(projectPath)
+    this.externalTaskIndex = null
+  }
+
   // ─── Load ──────────────────────────────────────────────────────────────────
 
   async loadAllProjects(folder: string): Promise<Project[]> {

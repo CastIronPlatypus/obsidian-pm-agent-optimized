@@ -107,6 +107,8 @@ export class ProjectView extends ItemView {
     this.headerEl = root.createDiv('pm-project-header-mount')
     this.bodyEl = root.createDiv('pm-content')
 
+    this.addAction('refresh-cw', 'Reload from disk', () => void this.reloadFromDisk())
+
     this.keydownHandler = (e: KeyboardEvent) => {
       this.subview?.handleKeyDown?.(e)
     }
@@ -143,6 +145,20 @@ export class ProjectView extends ItemView {
         })
       )
     )
+  }
+
+  /**
+   * Force a fresh read from disk, bypassing the store cache and re-sweeping the
+   * cross-folder external-task index. Backs the toolbar reload action: automatic
+   * invalidation can miss a change (e.g. a TaskNotes note whose `projects[]` link
+   * is parsed after the vault event fired, or that lives outside this project's
+   * task folder), so this lets the user pull in the latest state on demand.
+   */
+  private async reloadFromDisk(): Promise<void> {
+    if (!this.filePath) return
+    this.plugin.store.invalidateProject(this.filePath)
+    await this.loadProject()
+    this.plugin.showNotice('Project reloaded')
   }
 
   private async loadProject(): Promise<void> {
