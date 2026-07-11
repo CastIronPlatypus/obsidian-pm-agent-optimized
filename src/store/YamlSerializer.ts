@@ -120,8 +120,14 @@ export function buildTaskFrontmatter(
   // their reltype/gap, removed deps fall away, added deps get FS/P0D defaults.
   // Uids are written as `[[note-basename]]` (via `blockedByUid`) so TaskNotes
   // resolves them; `dependencies` above stays as bare ids for PM-only readers.
-  if (task.taskNotesBlockedBy) {
-    fm.blockedBy = mergeBlockedBy(task.taskNotesBlockedBy, task.dependencies, blockedByUid)
+  //
+  // Emit when either side has something to write: a captured `blockedBy` is
+  // preserved even with interop off (it's stripped from `foreign` on read, so
+  // this is its only round-trip path), while a PM-native dependency is exported
+  // only when interop is on — so a non-TaskNotes vault never gains a stray
+  // `blockedBy`, and a task with no deps never writes a noisy empty array.
+  if (task.taskNotesBlockedBy?.length || (taskNotes && task.dependencies.length)) {
+    fm.blockedBy = mergeBlockedBy(task.taskNotesBlockedBy ?? [], task.dependencies, blockedByUid)
   }
   // Another plugin's keys, carried through untouched. Written last, and never
   // over a field we own — a foreign `recurrence` only lands when we have none.
@@ -138,6 +144,16 @@ export function buildTaskFrontmatter(
     stampTaskNotesMarker(fm, taskNotes)
     // Current basename (not cached) so the link tracks a project rename for free.
     fm.projects = mergeProjectLink(fm.projects, noteBasename(project.filePath))
+    // TaskNotes models a subtask as a `projects[]` link to the parent *task*
+    // note (alongside the real project link) — its getTasksLinkedToProject reads
+    // exactly this field. Regenerated from the parent's current path on every
+    // save of *this* (child) task, so a parent rename only propagates once the
+    // child is next saved, and a pre-existing subtask gains the link on its next
+    // save. Removal isn't symmetric either: clearing `parentId` won't strip a
+    // stale link, since mergeProjectLink only ever adds.
+    if (parentTask?.filePath) {
+      fm.projects = mergeProjectLink(fm.projects, noteBasename(parentTask.filePath))
+    }
   }
   return fm
 }

@@ -683,3 +683,87 @@ describe('hydration does not alias the source frontmatter', () => {
     expect(fm.teamMembers).toEqual(['Alice'])
   })
 })
+
+describe('TaskNotes export: blockedBy from dependencies', () => {
+  const tnConfig: TaskNotesConfig = { identification: 'tag', taskTag: 'task', fieldName: '', fieldValue: '' }
+  const project = makeProject('Test', 'Projects/Test.md')
+  const uid = (id: string) => `[[note-${id}]]`
+
+  function frontmatterOf(task: Task, parent: Task | null, taskNotes: TaskNotesConfig | null) {
+    const md = serializeTask(task, project, parent, [], taskNotes, uid)
+    const { frontmatter } = parseFrontmatter(md)
+    if (!frontmatter) throw new Error('frontmatter missing')
+    return frontmatter
+  }
+
+  it('exports a PM-native dependency as blockedBy when interop is on', () => {
+    const task = makeTask({ title: 'T', dependencies: ['dep-1', 'dep-2'] })
+    const fm = frontmatterOf(task, null, tnConfig)
+
+    expect(fm.blockedBy).toEqual([
+      { uid: '[[note-dep-1]]', reltype: 'FS', gap: 'P0D' },
+      { uid: '[[note-dep-2]]', reltype: 'FS', gap: 'P0D' }
+    ])
+    // PM-only readers still get bare ids in dependencies[].
+    expect(fm.dependencies).toEqual(['dep-1', 'dep-2'])
+  })
+
+  it('does not emit blockedBy for a PM-native dependency when interop is off', () => {
+    const task = makeTask({ title: 'T', dependencies: ['dep-1'] })
+    const fm = frontmatterOf(task, null, null)
+
+    expect('blockedBy' in fm).toBe(false)
+  })
+
+  it('does not emit a noisy empty blockedBy when there are no dependencies', () => {
+    const task = makeTask({ title: 'T', dependencies: [] })
+    const fm = frontmatterOf(task, null, tnConfig)
+
+    expect('blockedBy' in fm).toBe(false)
+  })
+
+  it('preserves a captured blockedBy even with interop off', () => {
+    const task = makeTask({ title: 'T', dependencies: ['dep-1'] })
+    task.taskNotesBlockedBy = [{ uid: 'dep-1', reltype: 'SS', gap: 'P1D' }]
+    const fm = frontmatterOf(task, null, null)
+
+    // Captured reltype/gap survive; uid is rewritten via the resolver.
+    expect(fm.blockedBy).toEqual([{ uid: '[[note-dep-1]]', reltype: 'SS', gap: 'P1D' }])
+  })
+})
+
+describe('TaskNotes export: subtask parent link', () => {
+  const tnConfig: TaskNotesConfig = { identification: 'tag', taskTag: 'task', fieldName: '', fieldValue: '' }
+  const project = makeProject('Test', 'Projects/Test.md')
+
+  function projectsOf(task: Task, parent: Task | null, taskNotes: TaskNotesConfig | null) {
+    const md = serializeTask(task, project, parent, [], taskNotes)
+    const { frontmatter } = parseFrontmatter(md)
+    if (!frontmatter) throw new Error('frontmatter missing')
+    return frontmatter.projects
+  }
+
+  it('links a subtask to its parent task note alongside the project', () => {
+    const child = makeTask({ title: 'Child' })
+    const parent = makeTask({ title: 'Parent', filePath: 'Projects/Test_tasks/parent.md' })
+    const projects = projectsOf(child, parent, tnConfig)
+
+    expect(projects).toEqual(['[[Test]]', '[[parent]]'])
+  })
+
+  it('tracks the parent basename from its current path (rename tracking)', () => {
+    const child = makeTask({ title: 'Child' })
+    const renamed = makeTask({ title: 'Parent', filePath: 'Projects/Test_tasks/renamed-parent.md' })
+    const projects = projectsOf(child, renamed, tnConfig)
+
+    expect(projects).toEqual(['[[Test]]', '[[renamed-parent]]'])
+  })
+
+  it('adds no parent link when interop is off', () => {
+    const child = makeTask({ title: 'Child' })
+    const parent = makeTask({ title: 'Parent', filePath: 'Projects/Test_tasks/parent.md' })
+    const projects = projectsOf(child, parent, null)
+
+    expect(projects).toBeUndefined()
+  })
+})
