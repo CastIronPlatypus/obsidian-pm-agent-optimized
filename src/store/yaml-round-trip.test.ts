@@ -125,7 +125,9 @@ describe('task round-trip', () => {
   it('defaults missing fields to safe values', () => {
     const frontmatter: Record<string, unknown> = { id: 't-x' }
     const { task } = hydrateTaskFromFile(frontmatter, '', 'path.md')
-    expect(task.title).toBe('Untitled')
+    // No frontmatter title → falls back to the file basename (TaskNotes stores
+    // the title only in the filename).
+    expect(task.title).toBe('path')
     expect(task.status).toBe('todo')
     expect(task.priority).toBe('medium')
     expect(task.progress).toBe(0)
