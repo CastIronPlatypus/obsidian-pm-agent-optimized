@@ -11,6 +11,7 @@ import {
   prioritiesDiverge,
   readTaskNotesPriorities,
   readTaskNotesStatuses,
+  revertAllAlignments,
   revertFieldMapping,
   revertPriorities,
   revertStatuses,
@@ -150,7 +151,13 @@ export class PMSettingTab extends PluginSettingTab {
         .addToggle((t) =>
           t.setValue(this.plugin.settings.taskNotesInterop).onChange(async (v) => {
             this.plugin.settings.taskNotesInterop = v
+            // Disconnecting: restore PM's status/priority palettes and field names
+            // so they don't stay mixed with TaskNotes' vocabulary.
+            if (!v && (await revertAllAlignments(this.app, this.plugin.settings))) {
+              new Notice('Restored your statuses, priorities, and field names.')
+            }
             await this.plugin.saveSettings()
+            this.plugin.refreshProjectViews()
             this.display()
           })
         )

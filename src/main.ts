@@ -11,6 +11,8 @@ import { PMViewRouter } from './views/PMViewRouter'
 import { openProjectModal, openTaskModal, openProjectPicker, openTaskPicker, openImportModal } from './ui/ModalFactory'
 import { Notifier } from './components/Notifier'
 import { migrateProjects } from './migration'
+import { isTaskNotesInstalled } from './integrations/tasknotes'
+import { revertAllAlignments } from './integrations/tasknotesAlignment'
 import { safeAsync } from './utils'
 
 export default class PMPlugin extends Plugin {
@@ -58,6 +60,7 @@ export default class PMPlugin extends Plugin {
       safeAsync(async () => {
         await migrateProjects(this)
         await this.cleanupStaleProjectFilters()
+        await this.revertAlignmentsIfTaskNotesGone()
       })
     )
 
@@ -230,6 +233,20 @@ export default class PMPlugin extends Plugin {
       this.settings.projectFilters = cleaned
       this.settings.collapsedTasks = cleanedCollapsed
       await this.saveSettings()
+    }
+  }
+
+  /**
+   * If TaskNotes was uninstalled while alignment snapshots were still live, undo
+   * them on startup so PM's status/priority palettes and field names don't stay
+   * stuck on TaskNotes' vocabulary. No-op while TaskNotes is present — the user
+   * reverts those from settings, and turning off interop already restores them.
+   */
+  async revertAlignmentsIfTaskNotesGone(): Promise<void> {
+    if (isTaskNotesInstalled(this.app)) return
+    if (await revertAllAlignments(this.app, this.settings)) {
+      await this.saveSettings()
+      this.refreshProjectViews()
     }
   }
 

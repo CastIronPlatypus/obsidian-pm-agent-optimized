@@ -245,6 +245,27 @@ export async function revertTitleInFrontmatter(app: App, settings: PMSettings): 
   return true
 }
 
+// ─── Revert everything (disconnecting from TaskNotes) ─────────────────────────
+
+/**
+ * Undo every reversible alignment at once, restoring PM's (and TaskNotes') prior
+ * values from their snapshots. Called when the user turns off interop or when
+ * TaskNotes is gone — so PM's status/priority palettes and field names return to
+ * their pre-TaskNotes state instead of staying "mixed with TaskNotes".
+ *
+ * The one-shot `timeSync` migration is left untouched: it rewrote task files and
+ * has no snapshot, so it can't be reversed here. Safe with TaskNotes uninstalled —
+ * the field-mapping / title-storage reverts skip its settings and just drop the
+ * stale snapshot. Returns true when at least one alignment was reverted.
+ */
+export async function revertAllAlignments(app: App, settings: PMSettings): Promise<boolean> {
+  const statuses = revertStatuses(settings)
+  const priorities = revertPriorities(settings)
+  const fieldMapping = await revertFieldMapping(app, settings)
+  const titleStorage = await revertTitleInFrontmatter(app, settings)
+  return statuses || priorities || fieldMapping || titleStorage
+}
+
 export async function revertFieldMapping(app: App, settings: PMSettings): Promise<boolean> {
   const snap = settings.taskNotesAlignment.fieldMapping
   if (!snap) return false

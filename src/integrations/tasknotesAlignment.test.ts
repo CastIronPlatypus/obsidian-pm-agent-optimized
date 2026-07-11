@@ -10,6 +10,7 @@ import {
   PM_FIELD_MAPPING,
   prioritiesDiverge,
   readTaskNotesStatuses,
+  revertAllAlignments,
   revertFieldMapping,
   revertPriorities,
   revertStatuses,
@@ -213,5 +214,51 @@ describe('title storage', () => {
 
   it('adopt is a no-op without TaskNotes', async () => {
     expect(await adoptTitleInFrontmatter(makeApp(null).app, freshSettings())).toBe(false)
+  })
+})
+
+describe('revertAllAlignments', () => {
+  it('reverts statuses, priorities, field mapping, and title storage together', async () => {
+    const tn: Record<string, unknown> = {
+      customStatuses: TN_STATUSES,
+      customPriorities: TN_PRIORITIES,
+      fieldMapping: defaultFieldMapping(),
+      storeTitleInFilename: true
+    }
+    const h = makeApp(tn)
+    const settings = freshSettings()
+    const priorStatuses = settings.statuses
+    const priorPriorities = settings.priorities
+
+    adoptStatuses(h.app, settings)
+    adoptPriorities(h.app, settings)
+    await adoptFieldMapping(h.app, settings)
+    await adoptTitleInFrontmatter(h.app, settings)
+
+    expect(await revertAllAlignments(h.app, settings)).toBe(true)
+    expect(settings.statuses).toBe(priorStatuses)
+    expect(settings.priorities).toBe(priorPriorities)
+    expect(settings.taskNotesAlignment).toEqual({})
+    expect(tn.fieldMapping).toEqual(defaultFieldMapping())
+    expect(tn.storeTitleInFilename).toBe(true)
+  })
+
+  it('returns false when nothing was aligned', async () => {
+    expect(await revertAllAlignments(makeApp(null).app, freshSettings())).toBe(false)
+  })
+
+  it('reverts PM palettes even when TaskNotes is gone (deleted case)', async () => {
+    const h = makeApp({ customStatuses: TN_STATUSES, customPriorities: TN_PRIORITIES })
+    const settings = freshSettings()
+    const priorStatuses = settings.statuses
+    const priorPriorities = settings.priorities
+    adoptStatuses(h.app, settings)
+    adoptPriorities(h.app, settings)
+
+    // TaskNotes uninstalled: snapshots still live, but its plugin is unreachable.
+    expect(await revertAllAlignments(makeApp(null).app, settings)).toBe(true)
+    expect(settings.statuses).toBe(priorStatuses)
+    expect(settings.priorities).toBe(priorPriorities)
+    expect(settings.taskNotesAlignment).toEqual({})
   })
 })

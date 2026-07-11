@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Turning off "Share task files with TaskNotes" now restores your own statuses, priorities, and field names in one step, instead of leaving them mixed with TaskNotes' vocabulary. If TaskNotes is uninstalled while an alignment is still in effect, the same restore runs automatically on the next launch ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 - Add buttons in the table, Gantt, project editor, and settings share one quiet style
 - Remove buttons in the task editor, project editor, and settings are icon buttons with tooltips
 - The import dialog uses Obsidian's native buttons
