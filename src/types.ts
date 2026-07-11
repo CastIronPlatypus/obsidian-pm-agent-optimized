@@ -301,6 +301,19 @@ export const DEFAULT_SETTINGS: PMSettings = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Whether this vault's task files are in TaskNotes' time shape — `timeEstimate`
+ * in minutes, sessions under `timeEntries`. Keyed to the one-shot migration STAMP
+ * (`taskNotesAlignment.timeSync`), never the live `taskNotesTimeSync` toggle: the
+ * migration rewrote the files on disk once and is one-way, so their shape outlives
+ * the toggle being flipped back off. Read and write must follow the durable state
+ * of the files, not the flippable switch — deriving from the toggle misreads
+ * migrated minutes as hours the moment sync is turned off (a silent 60× error).
+ */
+export function timeShapeIsMinutes(settings: PMSettings): boolean {
+  return settings.taskNotesAlignment.timeSync !== undefined
+}
+
 export function makeId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }

@@ -63,24 +63,25 @@ const CACHE_ARTIFACT_KEYS: ReadonlySet<string> = new Set(['position'])
  * misread it 60× (see `mapRawToTask`). Defaults to self-deriving from the marker;
  * the inline-tasks path forces it true since embedded PM tasks carry no marker.
  *
- * `timeSync` (the `taskNotesTimeSync` toggle) makes TaskNotes' time shape canonical:
- * `timeEntries` becomes ours (kept out of foreign so we don't double-write it), and
- * `timeEstimate` is ours regardless of `pmAuthored` since we now read its minutes.
+ * `timeShapeMinutes` (this vault's files are in TaskNotes' minutes shape — see
+ * `timeShapeIsMinutes`) makes TaskNotes' time shape canonical: `timeEntries`
+ * becomes ours (kept out of foreign so we don't double-write it), and `timeEstimate`
+ * is ours regardless of `pmAuthored` since we now read its minutes.
  */
 export function collectForeign(
   r: Record<string, unknown>,
   pmAuthored = r[TASK_FRONTMATTER_KEY] === true,
-  timeSync = false
+  timeShapeMinutes = false
 ): Record<string, unknown> | undefined {
   const foreign: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(r)) {
     if (value === undefined || CACHE_ARTIFACT_KEYS.has(key)) continue
-    if (timeSync && key === 'timeEntries') continue
+    if (timeShapeMinutes && key === 'timeEntries') continue
     const owned =
       key === 'recurrence'
         ? isOwnRecurrence(value)
         : key === 'timeEstimate'
-          ? pmAuthored || timeSync
+          ? pmAuthored || timeShapeMinutes
           : TASK_OWNED_KEYS.has(key)
     if (owned) continue
     foreign[key] = structuredClone(value)
@@ -120,15 +121,39 @@ function foldBlockedBy(
 }
 
 /**
- * Read `timeEstimate` into our hours field. With `timeSync` on the raw value is
- * TaskNotes' minutes, converted to hours; otherwise it's ours (hours) but only on
- * a PM-authored file — a shared-in TaskNotes estimate stays foreign (see the 60×
- * misread guarded in `collectForeign`).
+ * Read `timeEstimate` into our hours field. When the vault is in minutes shape
+ * (`timeShapeMinutes`) the raw value is TaskNotes' minutes, converted to hours;
+ * otherwise it's ours (hours) but only on a PM-authored file — a shared-in
+ * TaskNotes estimate stays foreign (see the 60× misread guarded in `collectForeign`).
  */
-function readTimeEstimate(value: unknown, pmAuthored: boolean, timeSync: boolean): number | undefined {
+function readTimeEstimate(value: unknown, pmAuthored: boolean, timeShapeMinutes: boolean): number | undefined {
   if (typeof value !== 'number') return undefined
-  if (timeSync) return value / MINUTES_PER_HOUR
+  if (timeShapeMinutes) return value / MINUTES_PER_HOUR
   return pmAuthored ? value : undefined
+}
+
+/**
+ * At the moment PM first authors a note that came in from TaskNotes, its foreign
+ * `timeEstimate` is TaskNotes' *minutes* — but this save stamps `pm-task`, and on
+ * the next load a pm-authored file's `timeEstimate` is read as our *hours*, so
+ * those minutes would silently become a 60× estimate. Claim it here at the adoption
+ * moment: drop the foreign copy (PM owns the field now) and, when we hold no
+ * estimate of our own, convert its minutes into our hours.
+ *
+ * A no-op in minutes shape — there `collectForeign` never files `timeEstimate`
+ * under foreign, since the whole vault already reads/writes minutes.
+ */
+export function adoptForeignTimeEstimate(task: Task, timeShapeMinutes: boolean): void {
+  if (timeShapeMinutes) return
+  const foreign = task.foreign
+  if (!foreign || !('timeEstimate' in foreign)) return
+  const minutes = foreign.timeEstimate
+  const rest = { ...foreign }
+  delete rest.timeEstimate
+  task.foreign = Object.keys(rest).length ? rest : undefined
+  if (task.timeEstimate === undefined && typeof minutes === 'number') {
+    task.timeEstimate = minutes / MINUTES_PER_HOUR
+  }
 }
 
 /**
@@ -158,20 +183,21 @@ function mapTimeEntries(value: unknown): TimeEntry[] | undefined {
  * Map raw frontmatter fields to a Task, with optional overrides. `pmAuthored`
  * (self-derived from the `pm-task` marker, forced true for inline tasks) decides
  * whether `timeEstimate` is read as ours (hours) or left to `foreign` — see
- * `collectForeign`. `timeSync` (the `taskNotesTimeSync` toggle) adopts TaskNotes'
- * time shape: `timeEstimate` is read as minutes and converted to our hours, and
- * `timeEntries` sessions are hydrated as the canonical time record.
+ * `collectForeign`. `timeShapeMinutes` (this vault's files are in TaskNotes' minutes
+ * shape — see `timeShapeIsMinutes`) adopts TaskNotes' time shape: `timeEstimate` is
+ * read as minutes and converted to our hours, and `timeEntries` sessions are
+ * hydrated as the canonical time record.
  */
 export function mapRawToTask(
   r: Record<string, unknown>,
   overrides?: Partial<Task>,
   pmAuthored = r[TASK_FRONTMATTER_KEY] === true,
-  timeSync = false
+  timeShapeMinutes = false
 ): Task {
   return makeTask({
     ...foldBlockedBy(
       r,
-      collectForeign(r, pmAuthored, timeSync),
+      collectForeign(r, pmAuthored, timeShapeMinutes),
       Array.isArray(r.dependencies) ? [...(r.dependencies as string[])] : []
     ),
     id: r.id as string,
@@ -193,11 +219,11 @@ export function mapRawToTask(
     recurrence: isOwnRecurrence(r.recurrence)
       ? ({ ...(r.recurrence as Task['recurrence']) } as Task['recurrence'])
       : undefined,
-    timeEstimate: readTimeEstimate(r.timeEstimate, pmAuthored, timeSync),
+    timeEstimate: readTimeEstimate(r.timeEstimate, pmAuthored, timeShapeMinutes),
     timeLogs: Array.isArray(r.timeLogs)
       ? (r.timeLogs as { date: string; hours: number; note: string }[]).map((log) => ({ ...log }))
       : undefined,
-    timeEntries: timeSync ? mapTimeEntries(r.timeEntries) : undefined,
+    timeEntries: timeShapeMinutes ? mapTimeEntries(r.timeEntries) : undefined,
     customFields:
       typeof r.customFields === 'object' && r.customFields !== null
         ? { ...(r.customFields as Record<string, unknown>) }
@@ -245,7 +271,7 @@ export function hydrateTaskFromFile(
   body: string,
   filePath: string,
   external = false,
-  timeSync = false
+  timeShapeMinutes = false
 ): { task: Task; subtaskIds: string[]; parentId: string | null } {
   const hasId = typeof frontmatter.id === 'string' && frontmatter.id
   const hasTitle = typeof frontmatter.title === 'string' && frontmatter.title
@@ -264,7 +290,7 @@ export function hydrateTaskFromFile(
       ...(external ? { external: true } : {})
     },
     undefined,
-    timeSync
+    timeShapeMinutes
   )
   const subtaskIds = Array.isArray(frontmatter.subtaskIds) ? (frontmatter.subtaskIds as string[]) : []
   const parentId = typeof frontmatter.parentId === 'string' && frontmatter.parentId ? frontmatter.parentId : null

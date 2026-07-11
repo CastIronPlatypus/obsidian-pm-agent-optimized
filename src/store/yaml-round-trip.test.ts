@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { makeProject, makeTask, type Project, type SavedView, type Task } from '../types'
 import type { TaskNotesConfig } from '../integrations/tasknotes'
-import { hydrateProjectFromFrontmatter, hydrateTaskFromFile } from './YamlHydrator'
+import { adoptForeignTimeEstimate, hydrateProjectFromFrontmatter, hydrateTaskFromFile } from './YamlHydrator'
 import { parseFrontmatter } from './YamlParser'
 import { serializeProject, serializeTask, taskFilePath } from './YamlSerializer'
 
@@ -246,6 +246,35 @@ describe('foreign frontmatter round-trip', () => {
     const { frontmatter } = parseFrontmatter(md)
     if (!frontmatter) throw new Error('frontmatter missing')
     expect(frontmatter.timeEstimate).toBe(90)
+  })
+
+  it('adopts a foreign minutes timeEstimate into our hours (hours shape)', () => {
+    // A shared TaskNotes note PM is about to author: its minutes estimate sits in
+    // foreign. Adoption must convert it, not leave it to be misread as hours next load.
+    const task = makeTask({
+      title: 'Adopted',
+      timeEstimate: undefined,
+      foreign: { timeEstimate: 90, contexts: ['@x'] }
+    })
+    adoptForeignTimeEstimate(task, false)
+    expect(task.timeEstimate).toBe(1.5) // 90 min → 1.5 h
+    expect(task.foreign?.timeEstimate).toBeUndefined()
+    expect(task.foreign?.contexts).toEqual(['@x'])
+  })
+
+  it('adoption keeps PM’s own estimate and just drops the redundant foreign copy', () => {
+    // PM already edited the estimate to 3 h; the stale foreign minutes copy is dropped.
+    const task = makeTask({ title: 'Edited', timeEstimate: 3, foreign: { timeEstimate: 90 } })
+    adoptForeignTimeEstimate(task, false)
+    expect(task.timeEstimate).toBe(3)
+    expect(task.foreign).toBeUndefined()
+  })
+
+  it('adoption is a no-op in minutes shape (estimate already read as ours)', () => {
+    const task = makeTask({ title: 'Migrated', timeEstimate: 1.5, foreign: { contexts: ['@x'] } })
+    adoptForeignTimeEstimate(task, true)
+    expect(task.timeEstimate).toBe(1.5)
+    expect(task.foreign?.contexts).toEqual(['@x'])
   })
 
   it('reads timeEstimate as ours (hours) on a pm-task file', () => {

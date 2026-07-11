@@ -12,7 +12,7 @@ import {
   setTooltip
 } from 'obsidian'
 import type PMPlugin from '../main'
-import { Project, Task, makeTask } from '../types'
+import { Project, Task, makeTask, timeShapeIsMinutes } from '../types'
 import { flattenTasks } from '../store/TaskTreeOps'
 import { TaskFileNameConflictError } from '../store'
 import { safeAsync, getDefaultStatusId, getDefaultPriorityId, getPriorityConfig } from '../utils'
@@ -503,8 +503,9 @@ export class TaskModal extends Modal {
     renderSubtasksPanel(body, this.task, this.plugin, this.plugin.store.configFor(this.project).statuses)
 
     // ── Time tracking ─────────────────────────────────────────────────────────
-    const timeSync = this.plugin.settings.taskNotesInterop && this.plugin.settings.taskNotesTimeSync
-    renderTimeTrackingPanel(body, this.task, timeSync)
+    // Shape, not the toggle: after the one-shot migration the file's time lives in
+    // `timeEntries`, so the sessions panel must show even if sync was flipped off.
+    renderTimeTrackingPanel(body, this.task, timeShapeIsMinutes(this.plugin.settings))
 
     // ── Footer ──────────────────────────────────────────────────────────────
     const footer = contentEl.createDiv('pm-te-footer')

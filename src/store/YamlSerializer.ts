@@ -78,7 +78,7 @@ export function buildTaskFrontmatter(
   parentTask: Task | null,
   taskNotes: TaskNotesConfig | null = null,
   blockedByUid?: (id: string) => string,
-  timeSync = false
+  timeShapeMinutes = false
 ): Record<string, unknown> {
   const fm: Record<string, unknown> = {
     [TASK_FRONTMATTER_KEY]: true,
@@ -103,13 +103,13 @@ export function buildTaskFrontmatter(
   }
   if (task.completed) fm.completed = task.completed
   if (task.recurrence) fm.recurrence = task.recurrence
-  // With time sync on, TaskNotes' shape is canonical: write the estimate back as
+  // In minutes shape, TaskNotes' shape is canonical: write the estimate back as
   // minutes and the sessions as `timeEntries`, leaving `timeLogs` unwritten so the
-  // two representations can't drift. Off, PM keeps its hours + per-day `timeLogs`.
+  // two representations can't drift. Otherwise PM keeps its hours + per-day `timeLogs`.
   if (task.timeEstimate !== undefined) {
-    fm.timeEstimate = timeSync ? Math.round(task.timeEstimate * MINUTES_PER_HOUR) : task.timeEstimate
+    fm.timeEstimate = timeShapeMinutes ? Math.round(task.timeEstimate * MINUTES_PER_HOUR) : task.timeEstimate
   }
-  if (timeSync) {
+  if (timeShapeMinutes) {
     if (task.timeEntries?.length) fm.timeEntries = task.timeEntries
   } else if (task.timeLogs?.length) {
     fm.timeLogs = task.timeLogs
@@ -165,9 +165,9 @@ export function serializeTask(
   statuses: StatusConfig[] = [],
   taskNotes: TaskNotesConfig | null = null,
   blockedByUid?: (id: string) => string,
-  timeSync = false
+  timeShapeMinutes = false
 ): string {
-  const fm = buildTaskFrontmatter(task, project, parentTask, taskNotes, blockedByUid, timeSync)
+  const fm = buildTaskFrontmatter(task, project, parentTask, taskNotes, blockedByUid, timeShapeMinutes)
 
   const yamlLines: string[] = ['---']
   appendYaml(yamlLines, fm, 0)

@@ -7,18 +7,19 @@ import { ProgressBar } from '../ui/primitives/ProgressBar'
 
 /**
  * Renders the time tracking section (estimate, progress bar, log entries) into
- * the given container. Two shapes depending on `timeSync` (the
- * `taskNotesTimeSync` toggle):
- * - off: today's-date + hours + note rows over `task.timeLogs`.
- * - on: session rows (start/end datetimes + description) over `task.timeEntries`.
+ * the given container. Two shapes depending on `timeShapeMinutes` (whether the
+ * vault's files are in TaskNotes' minutes/`timeEntries` shape — see
+ * `timeShapeIsMinutes`):
+ * - false: today's-date + hours + note rows over `task.timeLogs`.
+ * - true: session rows (start/end datetimes + description) over `task.timeEntries`.
  * The estimate stays in hours either way — the model is always hours.
  */
-export function renderTimeTrackingPanel(container: HTMLElement, task: Task, timeSync: boolean): void {
+export function renderTimeTrackingPanel(container: HTMLElement, task: Task, timeShapeMinutes: boolean): void {
   if (task.type === 'milestone') return
 
   const timeSection = container.createDiv('pm-modal-section')
   const timeHeader = timeSection.createDiv('pm-modal-section-header')
-  const logged = timeSync ? totalEntriesHours(task) : totalLoggedHours(task)
+  const logged = timeShapeMinutes ? totalEntriesHours(task) : totalLoggedHours(task)
   const est = task.timeEstimate ?? 0
   const timeLabel = est > 0 ? `Time tracking (${logged}h / ${est}h)` : `Time tracking (${logged}h logged)`
   timeHeader.createEl('h4', { text: timeLabel, cls: 'pm-modal-section-title' })
@@ -44,7 +45,7 @@ export function renderTimeTrackingPanel(container: HTMLElement, task: Task, time
     if (over) bar.setColor('var(--color-red)')
   }
 
-  if (timeSync) renderSessions(timeSection, task)
+  if (timeShapeMinutes) renderSessions(timeSection, task)
   else renderLogs(timeSection, task)
 }
 
