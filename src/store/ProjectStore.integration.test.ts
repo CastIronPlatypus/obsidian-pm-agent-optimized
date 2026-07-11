@@ -170,6 +170,48 @@ describe('ProjectStore round-trips (fake vault)', () => {
     expect(fm?.dependencies).toEqual([xray.id, zeta.id])
   })
 
+  // Finding: `reconcileBlockedByFromDisk` no-oped when the task carried no
+  // blockedBy at read, so a blocker TaskNotes added mid-session was dropped once PM
+  // also gave the task a dependency of its own — buildTaskFrontmatter regenerated
+  // blockedBy from PM's deps alone, and the re-read foreign copy was skipped by
+  // `key in fm`. Fix: reconcile with an empty base when the disk has blockedBy.
+  it('merges a TaskNotes blocker added on disk even when the task had none at read', async () => {
+    disk.installTaskNotes()
+    const store = new ProjectStore(app, () => settingsWith())
+    const project = await store.createProject('P', 'Projects')
+    const path = project.filePath
+
+    const oscar = makeTask({ title: 'Oscar' })
+    await store.insertTask(project, oscar)
+    const november = makeTask({ title: 'November' })
+    await store.insertTask(project, november)
+    // Mike starts blocker-free → no blockedBy is captured as a reconcile base.
+    const mike = makeTask({ title: 'Mike' })
+    await store.insertTask(project, mike)
+    const mikePath = mike.filePath
+    if (!mikePath) throw new Error('task has no file path')
+
+    const loaded = await reload(store, path)
+    expect(byId(loaded, mike.id).dependencies).toEqual([])
+    expect(disk.frontmatter(mikePath)?.blockedBy).toBeUndefined()
+
+    // TaskNotes adds November as a blocker on disk, after PM read Mike blocker-free.
+    disk.editFrontmatter(mikePath, (fm) => {
+      fm.blockedBy = [{ uid: '[[november]]', reltype: 'FS', gap: 'P0D' }]
+    })
+
+    // PM gives Mike its own dependency (Oscar) and saves. Without the fix, blockedBy
+    // is regenerated from Oscar alone and November's blocker is silently deleted.
+    await store.updateTask(loaded, mike.id, { dependencies: [oscar.id] })
+
+    const fm = disk.frontmatter(mikePath)
+    if (!fm) throw new Error('missing frontmatter')
+    const uids = (fm.blockedBy as { uid: string }[]).map((b) => b.uid)
+    expect(uids).toContain('[[oscar]]')
+    expect(uids).toContain('[[november]]')
+    expect(fm?.dependencies).toEqual([oscar.id, november.id])
+  })
+
   // Finding: editing a TaskNotes-authored note in PM re-slugged its filename to
   // PM's scheme, severing every wikilink hung off the old basename, and could drop
   // foreign frontmatter keys. Fix: keep a non-PM basename as-is and re-read foreign

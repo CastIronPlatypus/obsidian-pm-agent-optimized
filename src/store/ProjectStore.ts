@@ -738,16 +738,21 @@ export class ProjectStore implements TaskSource {
    * just before we rewrite the file. Another editor (TaskNotes) may have added or
    * removed a blocker since we hydrated; without this, regenerating `blockedBy`
    * from our stale in-memory copy would resurrect a deleted dependency or drop a
-   * new one. Mirrors the foreign-key re-read on the same save paths. No-op unless
-   * the task carried a `blockedBy` when read.
+   * new one. Mirrors the foreign-key re-read on the same save paths. When the task
+   * carried no `blockedBy` at read but the disk has since gained one, we reconcile
+   * against an empty base so the addition still merges into `dependencies` — the
+   * only remaining window where a mid-session TaskNotes blocker could be lost.
    */
   private reconcileBlockedByFromDisk(task: Task, fm: Record<string, unknown> | null, project: Project): void {
-    if (!task.taskNotesBlockedBy) return
     const disk = parseBlockedBy(fm?.blockedBy).map((d) => ({
       ...d,
       uid: this.resolveUidInProject(d.uid, project, task.filePath)
     }))
-    const base = task.taskNotesBlockedBy.map((d) => d.uid)
+    // No base captured (read blocker-free) and still nothing on disk: leave
+    // dependencies untouched, and don't synthesize an empty base — that would start
+    // emitting a noisy empty `blockedBy` for a task that never had one.
+    if (!task.taskNotesBlockedBy && !disk.length) return
+    const base = (task.taskNotesBlockedBy ?? []).map((d) => d.uid)
     task.dependencies = reconcileDependencies(
       base,
       disk.map((d) => d.uid),
