@@ -291,8 +291,21 @@ export class ProjectStore implements TaskSource {
     // stale (often empty) cache — a note that just gained a TaskNotes `projects[]`
     // link wouldn't bust the cross-folder index and would stay invisible until a
     // reload. `metadata.changed` fires *after* the parse, so re-invalidate here to
-    // catch the now-visible link.
-    plugin.registerEvent(this.app.metadataCache.on('changed', (file) => this.invalidateForPath(file.path)))
+    // catch the now-visible link. This event fires for every parse in the vault,
+    // so gate it to files that actually matter to the cross-folder index: interop
+    // on, and the file is a shared task note linked to a project from outside its
+    // folder now, or was one we'd indexed (so losing the marker/link invalidates
+    // too). Everything else is already covered by the vault events above, which
+    // don't depend on the parse.
+    plugin.registerEvent(
+      this.app.metadataCache.on('changed', (file) => {
+        const tnConfig = this.taskNotesConfig()
+        if (!tnConfig) return
+        if (this.externalTaskOwners.has(file.path) || this.externalLinksForFile(file.path, tnConfig).length > 0) {
+          this.invalidateForPath(file.path)
+        }
+      })
+    )
   }
 
   private invalidateForPath(path: string): void {
