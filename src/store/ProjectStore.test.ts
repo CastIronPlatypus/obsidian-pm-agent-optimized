@@ -333,6 +333,51 @@ describe('ProjectStore completion date', () => {
   })
 })
 
+describe('ProjectStore subtask checkbox in parent body', () => {
+  async function parentBody(vault: FakeVault, parent: Task): Promise<string> {
+    const path = expectDefined(parent.filePath, 'parent has no filePath')
+    return expectDefined(vault.readSync(path), 'parent file missing')
+  }
+
+  it('rewrites the parent checkbox when a subtask reaches a complete status', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Progress', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const child = await addNamed(store, project, 'Child', parent.id)
+
+    expect(await parentBody(vault, parent)).toContain('- [ ] ')
+
+    await store.updateTask(project, child.id, { status: 'done' })
+
+    const body = await parentBody(vault, parent)
+    expect(body).toContain('- [x] ')
+    expect(body).not.toContain('- [ ] ')
+  })
+
+  it('clears the parent checkbox when a subtask leaves a complete status', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Reopen', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const child = await addNamed(store, project, 'Child', parent.id)
+    await store.updateTask(project, child.id, { status: 'done' })
+    expect(await parentBody(vault, parent)).toContain('- [x] ')
+
+    await store.updateTask(project, child.id, { status: 'in-progress' })
+    expect(await parentBody(vault, parent)).toContain('- [ ] ')
+  })
+
+  it('rewrites the parent checkbox on a bulk status update', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('BulkProgress', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const child = await addNamed(store, project, 'Child', parent.id)
+
+    await store.updateTasks(project, [child.id], { status: 'done' })
+
+    expect(await parentBody(vault, parent)).toContain('- [x] ')
+  })
+})
+
 describe('ProjectStore task attachments', () => {
   it('saves an attachment under the task own attachments folder', async () => {
     const { store, vault } = newStore()

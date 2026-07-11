@@ -239,6 +239,18 @@ export class ProjectStore implements TaskSource {
     this.markDirty(project, ids, kind)
   }
 
+  /**
+   * A subtask's terminal state drives its checkbox in the parent's `## Subtasks`
+   * body list — which is both our own representation and the source TaskNotes'
+   * card progress bar counts (checked items / total). So a child's status change
+   * has to rewrite the *parent's* body, not just the child's frontmatter.
+   */
+  private markParentBodyOnStatusChange(project: Project, taskId: string, statusChanged: boolean): void {
+    if (!statusChanged) return
+    const parentId = findParentId(project, taskId)
+    if (parentId) this.markDirty(project, [parentId], 'full')
+  }
+
   private clearDirty(project: Project): void {
     this.dirtyTasks.delete(project.filePath)
   }
@@ -1258,6 +1270,7 @@ export class ProjectStore implements TaskSource {
     // (body rewrite). Description/archived/subtasks patches require a body rewrite too.
     const kind: DirtyKind = patchNeedsBodyRewrite(patch) || titleChanged ? 'full' : 'fm'
     this.markDirty(project, [taskId], kind)
+    this.markParentBodyOnStatusChange(project, taskId, patch.status !== undefined)
     // Patch-set description is the caller's intent; trust it as the new body.
     if (task && patch.description !== undefined) this.hydratedBodies.add(task)
     if (task && patch.subtasks !== undefined) {
@@ -1329,6 +1342,7 @@ export class ProjectStore implements TaskSource {
       const titleChanged = p.title !== undefined && p.title !== oldTitle
       const kind: DirtyKind = patchNeedsBodyRewrite(p) || titleChanged ? 'full' : 'fm'
       this.markDirty(project, [id], kind)
+      this.markParentBodyOnStatusChange(project, id, p.status !== undefined)
       if (p.description !== undefined) this.hydratedBodies.add(task)
       if (titleChanged) {
         for (const sub of task.subtasks) this.markDirty(project, [sub.id], 'full')
