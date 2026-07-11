@@ -245,4 +245,71 @@ describe('ProjectStore round-trips (fake vault)', () => {
     fm = disk.frontmatter(taskPath)
     expect(fm?.timeEstimate).toBe(90)
   })
+
+  // ─── Known-broken repros (ticket eeb8c13) ──────────────────────────────────
+  // Both assert the *correct* behaviour and so throw today, which is why they run
+  // under `it.fails` (the suite stays green). When the fix lands — key the time
+  // shape to the `taskNotesAlignment.timeSync` migration stamp, not the live
+  // toggle — each body stops throwing and `it.fails` flips to red, signalling
+  // "delete the `.fails` and promote this to a real guard."
+
+  // Trap 1: after migration the files are durably in minutes shape, but toggling
+  // sync back off makes `readTimeEstimate` key off the live toggle and read those
+  // minutes as hours (2 h estimate surfaces as 120 h; timeEntries vanish).
+  it.fails('trap 1: toggling sync off misreads migrated minutes as hours', async () => {
+    disk.installTaskNotes()
+    const settings = settingsWith({ taskNotesTimeSync: false })
+    const store = new ProjectStore(app, () => settings)
+    const project = await store.createProject('P', 'Projects')
+    const path = project.filePath
+
+    const task = makeTask({ title: 'Timed', timeEstimate: 2 })
+    await store.insertTask(project, task)
+    const taskPath = task.filePath
+    if (!taskPath) throw new Error('task has no file path')
+
+    // Flip sync on and migrate: 2 h → 120 min, stamps taskNotesAlignment.timeSync.
+    settings.taskNotesTimeSync = true
+    await runTimeSyncMigration(app, settings)
+    expect(disk.frontmatter(taskPath)?.timeEstimate).toBe(120)
+
+    // User flips sync back off (settings.ts allows it freely); the stamp remains.
+    settings.taskNotesTimeSync = false
+
+    const loaded = await reload(store, path)
+    // Correct: the file is durably in minutes shape, so 120 min must read as 2 h.
+    expect(byId(loaded, task.id).timeEstimate).toBe(2)
+  })
+
+  // Trap 2: adopting a TaskNotes-authored note stamps `pm-task: true`; its foreign
+  // minutes `timeEstimate` round-trips verbatim on that save, but the *next* load
+  // sees a pmAuthored file and reads those minutes as hours — 90 min → 90 h. No
+  // toggle involved.
+  it.fails('trap 2: adopting a TaskNotes note flips its estimate units', async () => {
+    disk.installTaskNotes()
+    const settings = settingsWith({ taskNotesTimeSync: false })
+    const store = new ProjectStore(app, () => settings)
+    const project = await store.createProject('P', 'Projects')
+    const path = project.filePath
+
+    const notePath = 'Projects/P_tasks/Groom backlog.md'
+    disk.seedFile(notePath, {
+      title: 'Groom backlog',
+      status: 'todo',
+      tags: ['task'],
+      projects: ['[[P]]'],
+      timeEstimate: 90 // TaskNotes minutes = 1.5 h
+    })
+
+    const loaded = await reload(store, path)
+    const note = byTitle(loaded, 'Groom backlog')
+    // PM adopts the note: this save stamps pm-task and round-trips the 90 verbatim.
+    await store.updateTask(loaded, note.id, { status: 'in-progress' })
+    expect(disk.frontmatter(notePath)?.['pm-task']).toBe(true)
+    expect(disk.frontmatter(notePath)?.timeEstimate).toBe(90)
+
+    const after = await reload(store, path)
+    // Correct: adoption should have converted 90 min → 1.5 h, not reinterpreted units.
+    expect(byId(after, note.id).timeEstimate).toBe(1.5)
+  })
 })
