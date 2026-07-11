@@ -286,6 +286,13 @@ export class ProjectStore implements TaskSource {
         this.invalidateForPath(oldPath)
       })
     )
+    // A vault create/modify fires *before* Obsidian re-parses the file's
+    // frontmatter, so `invalidateForPath` reading `metadataCache` there sees a
+    // stale (often empty) cache — a note that just gained a TaskNotes `projects[]`
+    // link wouldn't bust the cross-folder index and would stay invisible until a
+    // reload. `metadata.changed` fires *after* the parse, so re-invalidate here to
+    // catch the now-visible link.
+    plugin.registerEvent(this.app.metadataCache.on('changed', (file) => this.invalidateForPath(file.path)))
   }
 
   private invalidateForPath(path: string): void {
