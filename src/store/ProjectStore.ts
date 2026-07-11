@@ -787,7 +787,7 @@ export class ProjectStore implements TaskSource {
     if (!base || !fm) return
     const writable = task as unknown as Record<string, unknown>
     for (const key of TASKNOTES_SHARED_FIELDS) {
-      const resolved = reconcileSharedField(base[key], fm[key], task[key])
+      const resolved = reconcileSharedField(key, base[key], fm[key], task[key])
       writable[key] = resolved
       base[key] = resolved
     }

@@ -243,26 +243,57 @@ describe('mergeProjectLink', () => {
 describe('reconcileSharedField', () => {
   it('adopts the disk value when PM did not change the field', () => {
     // base = mem = 'low', TaskNotes wrote 'high' on disk
-    expect(reconcileSharedField('low', 'high', 'low')).toBe('high')
+    expect(reconcileSharedField('priority', 'low', 'high', 'low')).toBe('high')
   })
 
   it('keeps PM value when PM changed the field (mem != base)', () => {
-    expect(reconcileSharedField('low', 'high', 'critical')).toBe('critical')
+    expect(reconcileSharedField('priority', 'low', 'high', 'critical')).toBe('critical')
   })
 
   it('keeps PM value when disk is unchanged', () => {
-    expect(reconcileSharedField('low', 'low', 'low')).toBe('low')
+    expect(reconcileSharedField('priority', 'low', 'low', 'low')).toBe('low')
   })
 
-  it('keeps PM value when the field is absent on disk', () => {
-    expect(reconcileSharedField('low', undefined, 'low')).toBe('low')
+  it('keeps PM value when an enum field is absent on disk', () => {
+    expect(reconcileSharedField('priority', 'low', undefined, 'low')).toBe('low')
   })
 
   it('keeps PM value when no base was captured', () => {
-    expect(reconcileSharedField(undefined, 'high', 'low')).toBe('low')
+    expect(reconcileSharedField('priority', undefined, 'high', 'low')).toBe('low')
   })
 
   it('adopts a newly-set disk value over an unset PM field', () => {
-    expect(reconcileSharedField('', '2026-08-01', '')).toBe('2026-08-01')
+    expect(reconcileSharedField('due', '', '2026-08-01', '')).toBe('2026-08-01')
+  })
+
+  it('adopts an unknown enum id verbatim (alignment owns vocabulary)', () => {
+    expect(reconcileSharedField('status', 'todo', 'waiting', 'todo')).toBe('waiting')
+  })
+
+  it('keeps PM value when an enum is nulled on disk', () => {
+    // A null status would blank a typed enum; keep PM's value instead.
+    expect(reconcileSharedField('status', 'todo', null, 'todo')).toBe('todo')
+  })
+
+  it('clears a date field to "" when TaskNotes writes null', () => {
+    expect(reconcileSharedField('due', '2026-08-01', null, '2026-08-01')).toBe('')
+  })
+
+  it('clears a date field to "" when TaskNotes deletes the key', () => {
+    // Absence is the external edit — the cleared date must not be resurrected.
+    expect(reconcileSharedField('due', '2026-08-01', undefined, '2026-08-01')).toBe('')
+  })
+
+  it('truncates a disk datetime to date-only for a date field', () => {
+    expect(reconcileSharedField('due', '2026-07-10', '2026-07-11T09:00', '2026-07-10')).toBe('2026-07-11')
+  })
+
+  it('truncates a parsed Date to date-only for a date field', () => {
+    const disk = new Date('2026-07-11T09:00:00Z')
+    expect(reconcileSharedField('start', '2026-07-10', disk, '2026-07-10')).toBe('2026-07-11')
+  })
+
+  it('lets a PM date edit win even when TaskNotes deleted the key', () => {
+    expect(reconcileSharedField('due', '2026-08-01', undefined, '2026-09-09')).toBe('2026-09-09')
   })
 })

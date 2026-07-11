@@ -122,6 +122,31 @@ export function mergeBlockedBy(
 export const TASKNOTES_SHARED_FIELDS = ['status', 'priority', 'due', 'start'] as const
 
 /**
+ * The shared fields PM types as a date-only `YYYY-MM-DD` string ('' = unset).
+ * Their disk value is shaped to that type on adoption (see `reconcileSharedField`);
+ * the enum fields (`status`/`priority`) are free-form strings and pass through.
+ */
+const SHARED_DATE_FIELDS: ReadonlySet<string> = new Set(['due', 'start'])
+
+/** True for a shared field PM stores as a date-only `YYYY-MM-DD` string. */
+export function isSharedDateField(field: string): boolean {
+  return SHARED_DATE_FIELDS.has(field)
+}
+
+/**
+ * Coerce a disk date value to the `YYYY-MM-DD` shape every PM consumer assumes.
+ * TaskNotes may write a full datetime (`2026-07-11T09:00`) or, once parsed, a
+ * `Date`; both truncate to their date. Anything unusable (a non-date scalar) reads
+ * as unset. The time-of-day is intentionally dropped — PM is date-only, so PM's next
+ * full-block write re-emits the date without it rather than carrying the time through.
+ */
+function normalizeSharedDate(value: unknown): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  if (typeof value === 'string') return value.slice(0, 10)
+  return ''
+}
+
+/**
  * Three-way reconcile of one shared scalar field on save:
  *   base — value captured when the task was last read
  *   disk — value currently in the file (TaskNotes may have changed it)
@@ -129,12 +154,21 @@ export const TASKNOTES_SHARED_FIELDS = ['status', 'priority', 'due', 'start'] as
  * PM only wins for a field it actually changed (mem ≠ base); otherwise the disk
  * value wins, so an external edit survives PM's next write. With no base captured
  * (interop was off at read, or a brand-new task) PM's value stands.
+ *
+ * The adopted disk value is normalized to PM's type at this trust boundary. For a
+ * date field (`due`/`start`) a `null` or absent key is TaskNotes clearing the date,
+ * adopted as '' — so a cleared date isn't resurrected from PM's stale copy on the
+ * next save — and a datetime truncates to `YYYY-MM-DD`. An enum field (`status`/
+ * `priority`) is a free-form id adopted verbatim (the alignment moment owns
+ * vocabulary, so an unknown id is left alone), except a null/absent clear keeps
+ * PM's value rather than blanking a typed enum.
  */
-export function reconcileSharedField(base: unknown, disk: unknown, mem: unknown): unknown {
+export function reconcileSharedField(field: string, base: unknown, disk: unknown, mem: unknown): unknown {
   if (base === undefined) return mem
   if (!Object.is(mem, base)) return mem
-  if (disk === undefined) return mem
-  return disk
+  const dateField = isSharedDateField(field)
+  if (disk === undefined || disk === null) return dateField ? '' : mem
+  return dateField ? normalizeSharedDate(disk) : disk
 }
 
 /**
