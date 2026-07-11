@@ -32,6 +32,7 @@ import {
   resolveBlockedByUid,
   resolveProjectLinks,
   resolveTaskNotesRef,
+  stripMarkerTag,
   TASKNOTES_SHARED_FIELDS,
   type TaskNotesConfig
 } from '../integrations/tasknotes'
@@ -805,6 +806,7 @@ export class ProjectStore implements TaskSource {
       const cached = this.app.metadataCache.getFileCache(file)?.frontmatter
       if (cached && this.isTaskFile(cached, tnConfig)) {
         const result = hydrateTaskFromFile(cached, '', file.path, external, timeSync)
+        if (tnConfig) result.task.tags = stripMarkerTag(result.task.tags, tnConfig)
         if (interop) this.captureSharedBase(result.task)
         return result
       }
@@ -816,6 +818,7 @@ export class ProjectStore implements TaskSource {
       }
 
       const result = hydrateTaskFromFile(frontmatter, body, file.path, external, timeSync)
+      if (tnConfig) result.task.tags = stripMarkerTag(result.task.tags, tnConfig)
       this.hydratedBodies.add(result.task)
       if (interop) this.captureSharedBase(result.task)
       return result

@@ -250,6 +250,20 @@ export function stampTaskNotesMarker(fm: Record<string, unknown>, config: TaskNo
 }
 
 /**
+ * Drop TaskNotes' identifier tag from a hydrated task's tag list. In `tag` mode PM
+ * stamps `config.taskTag` into every task file (see `stampTaskNotesMarker`) so the
+ * note is visible to TaskNotes — it's plumbing, not a user label, so we keep it out
+ * of the in-memory model and thus out of the UI. `stampTaskNotesMarker` re-adds it
+ * to the frontmatter on the next save, so disk keeps carrying it. Returns the same
+ * array reference when there's nothing to strip (property mode, or tag absent).
+ */
+export function stripMarkerTag(tags: string[], config: TaskNotesConfig): string[] {
+  if (config.identification !== 'tag') return tags
+  const wanted = normalizeTag(config.taskTag)
+  return tags.some((t) => normalizeTag(t) === wanted) ? tags.filter((t) => normalizeTag(t) !== wanted) : tags
+}
+
+/**
  * Extract a wikilink's target basename: `[[Foo|Bar]]` → `Foo`, `[[Foo#Sec]]` →
  * `Foo`, plain `Foo` → `Foo`. Returns null for anything that isn't a non-empty
  * string. Used to dedupe project links by what they point at, not their raw form.

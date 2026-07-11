@@ -1307,6 +1307,47 @@ describe('cross-folder TaskNotes ingestion (Phase 3b)', () => {
     const [loaded] = await new ProjectStore(app, () => offSettings).loadAllProjects('Projects')
     expect(findTask(loaded.tasks, 'ext-1')).toBeNull()
   })
+
+  // The `task` marker is plumbing for TaskNotes visibility, not a user label — it
+  // must stay out of the hydrated model (and thus the UI) while remaining on disk.
+  const taggedNote = (tags: string[]): string =>
+    [
+      '---',
+      'tags:',
+      ...tags.map((t) => `  - ${t}`),
+      'projects:',
+      '  - "[[Refactoring]]"',
+      'id: ext-1',
+      'title: Shared',
+      'status: todo',
+      '---',
+      '',
+      'body'
+    ].join('\n')
+
+  it('strips the TaskNotes marker tag from hydrated tasks but keeps user tags', async () => {
+    const { vault, newStore } = taskNotesApp()
+    await newStore().createProject('Refactoring', 'Projects')
+    await vault.create('Inbox/shared.md', taggedNote(['task', 'urgent']))
+
+    const [loaded] = await newStore().loadAllProjects('Projects')
+    const ext = expectDefined(findTask(loaded.tasks, 'ext-1'))
+    expect(ext.tags).toEqual(['urgent'])
+  })
+
+  it('re-stamps the marker tag on disk when saving a hydrated task', async () => {
+    const { vault, newStore } = taskNotesApp()
+    await newStore().createProject('Refactoring', 'Projects')
+    await vault.create('Inbox/shared.md', taggedNote(['task', 'urgent']))
+
+    const store = newStore()
+    const [loaded] = await store.loadAllProjects('Projects')
+    await store.updateTask(loaded, 'ext-1', { status: 'in-progress' })
+
+    const content = await vault.read(expectDefined(vault.getFileByPath('Inbox/shared.md')))
+    expect(content).toContain('urgent')
+    expect(content).toContain('task') // marker re-added even though the model dropped it
+  })
 })
 
 describe('TaskNotes blockedBy uid resolution (Phase 4)', () => {

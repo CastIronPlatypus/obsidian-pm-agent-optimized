@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With TaskNotes installed, a project's cross-folder external-task index is refreshed when a note's frontmatter is parsed, so a TaskNotes task linked to a project from outside its task folder shows up the next time the project is opened rather than only after a full reload ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 - Renaming a task file (from a title change) now moves the file so Obsidian updates every wikilink pointing at it, instead of creating a new file and trashing the old one — a subtask's parent link and other tasks' `blockedBy` links to it no longer break until the referring file happens to be re-saved ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 - A task note you named yourself (e.g. a TaskNotes note titled "Fix the boiler") is no longer slug-renamed to `fix-the-boiler` by a routine edit such as a status change — only files this plugin named are renamed to track the title ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
+- With TaskNotes installed, the marker tag this plugin writes so TaskNotes can see a task (`task` by default) no longer shows up as a task tag in the table, task editor, and filters — it's plumbing kept on disk, not a label you have to manage ([#10](https://github.com/StepanKropachev/obsidian-pm/issues/10))
 
 ## [1.8.0] - 2026-07-03
 
