@@ -37,6 +37,13 @@ export interface TaskSource {
   deleteProject(project: Project): Promise<void>
 
   insertTask(project: Project, task: Task, parentId?: string | null): Promise<void>
+  /**
+   * Ingest an externally-authored `pm-task` file that appeared under a project's
+   * tasks folder: backfill a missing id and required frontmatter onto disk,
+   * resolve blank fields to defaults, and wire it into the project's ordering.
+   * Returns null (without throwing) for a non-pm-task / malformed / out-of-folder file.
+   */
+  ingestExternalTask(project: Project, file: TFile): Promise<Task | null>
   duplicateTask(project: Project, sourceId: string, includeSubtasks: boolean): Promise<Task | null>
   importNoteAsTask(project: Project, file: TFile, opts: ImportNoteOptions): Promise<'imported' | 'skipped'>
   importTaskForest(

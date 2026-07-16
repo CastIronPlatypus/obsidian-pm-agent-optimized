@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, makeTask, type PMSettings, type Project, type StatusC
 import { ProjectStore } from './ProjectStore'
 import { buildTaskIndex } from './TaskIndex'
 import { findTask, flattenTasks } from './TaskTreeOps'
+import { parseFrontmatter } from './YamlParser'
 
 const expectDefined = <T>(value: T | null | undefined, message = 'expected value to be defined'): T => {
   if (value == null) throw new Error(message)
@@ -952,5 +953,94 @@ describe('per-project config', () => {
 
     project.config = undefined
     expect(await store.scheduleAfterChange(project, a.id)).toBeGreaterThan(0)
+  })
+})
+
+describe('ProjectStore external task ingestion', () => {
+  const fileAt = (vault: FakeVault, path: string): TFile => {
+    const f = vault.getAbstractFileByPath(path)
+    if (!(f instanceof TFile)) throw new Error(`expected a file at ${path}`)
+    return f
+  }
+  const taskBody = (lines: string[]): string => lines.join('\n')
+  const fmOf = async (vault: FakeVault, path: string): Promise<Record<string, unknown>> =>
+    parseFrontmatter(await vault.cachedRead(fileAt(vault, path))).frontmatter ?? {}
+
+  it('ignores a task file outside the project tasks folder', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+    const path = 'Elsewhere/loose.md'
+    await vault.create(path, taskBody(['---', 'pm-task: true', 'title: Loose', '---', '', 'body']))
+    const before = project.tasks.length
+    expect(await store.ingestExternalTask(project, fileAt(vault, path))).toBeNull()
+    expect(project.tasks.length).toBe(before)
+  })
+
+  it('is idempotent — re-ingesting the same file does not duplicate', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+    const path = 'Projects/Inbox_tasks/dup.md'
+    await vault.create(path, taskBody(['---', 'pm-task: true', 'title: Once', '---', '', 'body']))
+
+    const first = await store.ingestExternalTask(project, fileAt(vault, path))
+    expect(first).not.toBeNull()
+    const before = flattenTasks(project.tasks).length
+    const second = await store.ingestExternalTask(project, fileAt(vault, path))
+    expect(second?.id).toBe(first?.id)
+    expect(flattenTasks(project.tasks).length).toBe(before)
+  })
+
+  it('treats a parentId pointing at a nonexistent parent as top-level', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+    const path = 'Projects/Inbox_tasks/orphan.md'
+    await vault.create(
+      path,
+      taskBody(['---', 'pm-task: true', 'title: Orphan', 'parentId: ghost-id', '---', '', 'body'])
+    )
+    const task = await store.ingestExternalTask(project, fileAt(vault, path))
+    expect(task).not.toBeNull()
+    if (!task) return
+    // Landed at top-level, and its id is in the project's persisted taskIds.
+    expect(project.tasks.some((t) => t.id === task.id)).toBe(true)
+    const taskIds = (await fmOf(vault, project.filePath)).taskIds
+    expect(Array.isArray(taskIds) ? taskIds.map(String) : []).toContain(task.id)
+  })
+
+  it('nests under an existing parent and persists the parent subtaskIds', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const path = 'Projects/Inbox_tasks/child-ext.md'
+    await vault.create(
+      path,
+      taskBody(['---', 'pm-task: true', 'title: Child', `parentId: ${parent.id}`, '---', '', 'body'])
+    )
+    const child = await store.ingestExternalTask(project, fileAt(vault, path))
+    expect(child).not.toBeNull()
+    if (!child) return
+    expect(findTask(project.tasks, child.id)).toBeDefined()
+    const parentSubIds = (await fmOf(vault, expectDefined(parent.filePath))).subtaskIds
+    expect(Array.isArray(parentSubIds) ? parentSubIds.map(String) : []).toContain(child.id)
+  })
+
+  it('marks a task in the Archive subfolder as archived', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+    const path = 'Projects/Inbox_tasks/Archive/done.md'
+    await vault.create(path, taskBody(['---', 'pm-task: true', 'title: Done long ago', '---', '', 'body']))
+    const task = await store.ingestExternalTask(project, fileAt(vault, path))
+    expect(task).not.toBeNull()
+    expect(task?.archived).toBe(true)
+  })
+
+  it('preserves an existing non-empty id on the file', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+    const path = 'Projects/Inbox_tasks/hasid.md'
+    await vault.create(path, taskBody(['---', 'pm-task: true', 'id: keep-me-123', 'title: Has id', '---', '', 'body']))
+    const task = await store.ingestExternalTask(project, fileAt(vault, path))
+    expect(task?.id).toBe('keep-me-123')
+    expect((await fmOf(vault, path)).id).toBe('keep-me-123')
   })
 })

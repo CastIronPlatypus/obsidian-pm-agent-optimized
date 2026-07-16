@@ -1,7 +1,7 @@
 import type { Plugin, TAbstractFile } from 'obsidian'
 import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian'
 import type { PMSettings, Project, ResolvedProjectConfig, StatusConfig, Task } from '../types'
-import { DEFAULT_SETTINGS, makeProject, makeTask } from '../types'
+import { DEFAULT_SETTINGS, makeId, makeProject, makeTask } from '../types'
 import { today } from '../dates'
 import { isTerminalStatus } from '../utils'
 import { archiveTask as doArchiveTask, unarchiveTask as doUnarchiveTask } from './ArchiveOps'
@@ -695,6 +695,77 @@ export class ProjectStore implements TaskSource {
     this.markDirty(project, [task.id], 'full')
     if (parentId) this.markDirty(project, [parentId], 'full')
     await this.saveProject(project)
+  }
+
+  /**
+   * Ingest an externally-authored `pm-task` file that appeared under this
+   * project's `<Name>_tasks/` folder (created or modified outside the plugin).
+   *
+   * Backfills a unique `id` (first) plus the full required frontmatter onto the
+   * file via processFrontMatter — self-write-marked so the resulting modify
+   * event is not re-ingested (no echo) — resolves blank fields to their
+   * defaults, adds the task to the in-memory tree, and persists the project's
+   * ordering (`taskIds`, or the parent's `subtaskIds` when parented). Returns
+   * the ingested task, or null for a non-pm-task / malformed / out-of-folder
+   * file; those never throw and leave the tree untouched.
+   */
+  async ingestExternalTask(project: Project, file: TFile): Promise<Task | null> {
+    try {
+      // Only files under this project's tasks folder are ingested (loose files
+      // elsewhere in the vault are not — see INT-013 Non-Goals).
+      const taskFolder = this.projectTaskFolder(project)
+      const filePath = normalizePath(file.path)
+      if (!filePath.startsWith(normalizePath(taskFolder) + '/')) return null
+
+      const content = await this.app.vault.cachedRead(file)
+      const { frontmatter, body } = parseFrontmatter(content)
+      if (!frontmatter || frontmatter[TASK_FRONTMATTER_KEY] !== true) return null
+
+      // Backfill a unique id first: a blank/absent id gets a freshly minted one.
+      const rawId = frontmatter.id
+      const id = typeof rawId === 'string' && rawId.length > 0 ? rawId : makeId()
+
+      // Idempotent: a task the store already tracks under this id is not
+      // re-added. Recover its filePath if it was cache-loaded without one.
+      const existing = findTaskById(project, id)
+      if (existing) {
+        if (!existing.filePath) existing.filePath = filePath
+        return existing
+      }
+
+      // Blank status/priority resolve to defaults inside mapRawToTask.
+      const { task, parentId } = hydrateTaskFromFile({ ...frontmatter, id }, body, filePath)
+      task.id = id
+      this.hydratedBodies.add(task)
+
+      // Honor parentId only when the parent actually exists; otherwise top-level.
+      const resolvedParentId = parentId && findTaskById(project, parentId) ? parentId : null
+
+      // Archived state is derived from location, matching the folder load path.
+      if (filePath.startsWith(normalizePath(taskFolder + '/Archive') + '/')) task.archived = true
+
+      addTaskToTree(project.tasks, task, resolvedParentId)
+      indexAddSubtree(project, task, resolvedParentId)
+
+      // Backfill the full required frontmatter (id + defaults) back onto disk.
+      // Self-mark first so the modify event this write raises is skipped.
+      const parentTask = resolvedParentId ? findTaskById(project, resolvedParentId) : null
+      const nextFm = buildTaskFrontmatter(task, project, parentTask)
+      this.markSelfWrite(filePath)
+      await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+        Object.assign(fm, nextFm)
+      })
+
+      // Persist ordering: a top-level id lands in the project file's taskIds;
+      // a parented task's id lands in the parent's subtaskIds.
+      if (resolvedParentId) this.markDirty(project, [resolvedParentId], 'full')
+      await this.saveProject(project)
+
+      return task
+    } catch (e) {
+      console.error(`[PM] Failed to ingest external task ${file.path}:`, e)
+      return null
+    }
   }
 
   /**
