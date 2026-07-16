@@ -45,6 +45,7 @@ A project declares the directory it lives in via a vault-relative `path` frontma
 | Discovered projects | in | `pm-project: true` files | `metadataCache` vault-wide scan | every such file is found regardless of folder |
 | `createProject(dir, …)` | in | caller-supplied directory | modal / command | file written under `dir`; `path` persisted |
 | `moveProject(project, newDir)` | in | new destination directory | existing-project settings modal | whole project folder (file + `<Name>_tasks/` incl. attachments + Archive) moved under `newDir`; `path` frontmatter updated; tasks stay attached; spaces honored literally |
+| `isProjectRelevantPath(path)` | out | boolean | DashboardView live-refresh guard | true for a `pm-project: true` file (via `metadataCache`) anywhere in the vault OR a markdown file under a known project's dir / `<Name>_tasks` folder; false for unrelated notes — regardless of the global folder |
 
 ### Dependencies
 
@@ -67,6 +68,7 @@ A project declares the directory it lives in via a vault-relative `path` frontma
 3. **general** Discovery finds every `pm-project: true` file anywhere in the vault. (R9)
 4. **general** `createProject` writes the new project file into the caller-supplied directory and persists that directory as `path`. (R10)
 5. **general** *(amendment 2026-07-16)* Changing an already-created project's folder path via `moveProject(project, newDir)` relocates the whole project folder — the project file and its `<Name>_tasks/` folder (attachments and Archive included) — under `newDir`, leaves nothing at the old location, updates the project's `path` frontmatter and resolved `projectDirectory` to `newDir`, and keeps its tasks attached. (R26) A `newDir` containing spaces is honored literally — files land at the exact spaced path and stay discoverable. (R27)
+6. **general** *(amendment 2 2026-07-16)* The dashboard's live-refresh guard is vault-wide, not folder-scoped: `isProjectRelevantPath(path)` returns true for a `pm-project: true` file (resolved via `metadataCache`) filed anywhere in the vault — even outside the global `projectsFolder` — and for a markdown file under a known project's directory or its `<Name>_tasks` folder, and false for an unrelated note. The DashboardView routes its create/rename/delete refresh guard through this predicate, so a project (or task file) created/renamed/deleted anywhere live-refreshes the dashboard the same vault-wide way discovery finds it. (R28)
 
 ## Failure Behavior
 
@@ -85,3 +87,4 @@ A project declares the directory it lives in via a vault-relative `path` frontma
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | WS authored at ACCEPTED under INT-014 `--decompose` (acceptance criteria = R8–R11 in `src/intention.test.ts`). | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Amended under INT-014 completeness (engineer-directed): added Business Rule 5 + the `moveProject(project, newDir)` data interface for the editable-folder-path / move-on-save capability. New acceptance criteria R26/R27 in `src/intention.test.ts`. | Claude (Worker V01, engineer-directed) |
+| 2026-07-16 | Substantive | Amended under INT-014 completeness (engineer-directed): added Business Rule 6 + the `isProjectRelevantPath(path)` data interface for the dashboard vault-wide live-refresh capability. New acceptance criterion R28 in `src/intention.test.ts`. | Claude (dashboard-refresh worker, engineer-directed) |

@@ -2,7 +2,7 @@
 
 ## Status
 
-LOCKED
+IMPLEMENTING
 
 ## Intent type
 
@@ -52,6 +52,8 @@ A project declares the directory it lives in via its own frontmatter, and the pl
 
 An author can also **re-point an already-created project's directory** after the fact: the existing-project settings/configure modal exposes an editable folder-path field, and on save — when the path changed — the plugin moves the whole project folder (the project file, its `<Name>_tasks/` folder, and everything under it: attachments and the Archive subfolder) so it now lives under the new folder path, and updates the project's `path` frontmatter to match. Folder names containing spaces are handled literally (the files land at the exact spaced path, discoverable afterward). This completes the reorganize-over-time promise the create-time path field only half-delivered: without a move surface on the existing-project modal, a user who restructures their vault hierarchy could set a project's directory only at creation, never afterward.
 
+Finally, the **project dashboard live-refreshes vault-wide**: when a `pm-project: true` file is created, renamed, or deleted anywhere in the vault — not only under the former global projects folder — the dashboard's project list re-renders on its own, matching the vault-wide reach of discovery. Because discovery went vault-wide but the dashboard's live-refresh guard still only matched the global folder, a project filed in any category subfolder appeared only after a manual reload. The dashboard now routes its refresh guard through a single store predicate that answers "should the project dashboard refresh for this path?" the same vault-wide way discovery does — so a project (or task file) filed anywhere refreshes the dashboard immediately, while unrelated notes do not.
+
 ## Non-Goals
 
 - No automatic migration or bulk re-filing of existing projects into category subfolders — existing projects keep working in place (R11); reorganizing the tree is a manual, user-driven act this Intent merely stops obstructing.
@@ -86,6 +88,7 @@ The Desired Outcome above states the new behavior in user-observable terms: a pr
 | `createProject` takes no directory argument; create-project modal has no path field | analyze — contract R10 vs `TaskSource`/`ProjectStore`/`ProjectModal` | Resolve in this Intent: thread a directory arg through `createProject` and add the modal field | open |
 | Regression risk: legacy projects under the default folder must keep loading | analyze — contract R11 | Resolve in this Intent via the fallback path; guarded by the parallel-authored `src/intention.test.ts` R11 case | open |
 | Amendment (2026-07-16): existing-project settings modal cannot re-point an already-created project's folder; no store surface moves a project's whole folder on a path change | amendment — completeness gap vs create-project-only path field | Resolve in this amendment: add `ProjectStore.moveProject(project, newDir)` (moves project file + `<Name>_tasks/` + attachments + Archive, updates `path` frontmatter, handles spaces) + an editable folder-path field on the existing-project settings modal that calls it on save; guarded by `src/intention.test.ts` R26/R27 | open |
+| Amendment 2 (2026-07-16): discovery went vault-wide but the dashboard's live-refresh guard still hard-codes the global `projectsFolder` prefix, so a `pm-project: true` file created/renamed/deleted in a custom category dir refreshes the dashboard only on manual reload | amendment — completeness gap vs vault-wide discovery | Resolve in this amendment: add `ProjectStore.isProjectRelevantPath(path)` (vault-wide predicate: true for a `pm-project: true` file via metadataCache OR a markdown file under a known project's directory / `<Name>_tasks` folder, regardless of the global folder) and route the DashboardView refresh guard through it; guarded by `src/intention.test.ts` R28 | open |
 
 ## Size assessment
 
@@ -126,6 +129,11 @@ verification:
   # updated) and R27 (spaced target folder handled literally).
   - name: intention-contract-r26-r27
     cmd: vitest run src/intention.test.ts
+  # Amendment 2 (2026-07-16): the dashboard vault-wide live-refresh scope is
+  # pinned by R28 (isProjectRelevantPath is vault-wide, not folder-scoped: a
+  # pm-project file in a custom dir is relevant; an unrelated note is not).
+  - name: intention-contract-r28
+    cmd: vitest run src/intention.test.ts
 ```
 
 ### Testpass results (2026-07-16)
@@ -155,6 +163,8 @@ The editable-folder-path / move-on-save amendment (see Amendment Log) re-locks v
 On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store resolves that project's directory to `Projects/Income/Q3-launch` (not the global folder), while a project with no `path` key resolves to its file's actual parent folder — both surfaced by discovery's vault-wide `pm-project: true` scan. Tested by the R8–R11 cases in `src/intention.test.ts` (authored in parallel); the R8 (contract), R9 (discovery), R10 (create-in-directory), and R11 (legacy fallback) assertions are the red-first outcome tests this Intent makes green.
 
 **Amendment (2026-07-16) — editable folder path + move on save.** On an already-created project, changing its folder path via `ProjectStore.moveProject(project, newDir)` relocates the project file AND its `<Name>_tasks/` folder (with attachments and Archive) to `newDir`, leaves nothing at the old location, updates the project's `path` frontmatter and `projectDirectory(project)` to `newDir`, and keeps its tasks attached at the new folder. A target directory containing spaces (e.g. `Areas/Income Projects`) is honored literally. These are the red-first outcome tests R26 (relocation + path update, tasks not orphaned) and R27 (spaced path handled literally) in `src/intention.test.ts`.
+
+**Amendment 2 (2026-07-16) — dashboard vault-wide live-refresh.** `ProjectStore.isProjectRelevantPath(path)` returns `true` for a `pm-project: true` file filed anywhere in the vault (resolved via `metadataCache`, e.g. `Areas/Community/Neighborhood Cleanup.md`) even though it sits outside the global `projectsFolder`, and `false` for an unrelated note (e.g. `Notes/Some Random Note.md`); a markdown file under a known project's directory or its `<Name>_tasks` folder is also relevant so task-file changes still refresh. The DashboardView refresh guard routes through this predicate instead of a global-folder prefix check, so a project created/renamed/deleted anywhere live-refreshes the dashboard. This is the red-first outcome test R28 in `src/intention.test.ts`.
 
 ## Open Issues
 
@@ -190,3 +200,6 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 | 2026-07-16 | Substantive | Amended scope (retroactive, engineer-directed completeness of INT-014 — NOT a new Intent): added the editable-folder-path / move-on-save capability to Desired Outcome, Components (existing-project settings modal), a 5th coverage row, Outcome Verification, and the Verification predicate (intention-contract-r26-r27). New store surface pinned: `ProjectStore.moveProject(project, newDir)` — moves the whole project folder (project file + `<Name>_tasks/` incl. attachments + Archive) on a path change, updates `path` frontmatter, handles spaces. Guarded red-first by `src/intention.test.ts` R26/R27 (authored this change). WS-002 + IB-002 amended in lockstep with the delta. Status set to IMPLEMENTING (delta already decomposed inline under delegated authority; the analyze/decompose caps re-checked and still PASS). The next (implement) + land workers re-lock via ADR-017 Path B once R26/R27 are green. | Claude (Worker V01, engineer-directed) |
 | 2026-07-16 | Substantive | Amendment implemented on `main` (commit `cf0f8fd`): `ProjectStore.moveProject` (target-occupied throws before any write; intermediate folders auto-created via `ensureFolder`; spaces/unicode honored literally; tasks re-attached via the shared `rebindRenamedProject` INT-015 machinery) + editable folder-path field on the existing-project settings modal. Amendment predicate re-evaluated from `main`: `pnpm check` exit 0; `pnpm test` 274 passed/1 skipped; `vitest src/intention.test.ts -t "R26"`/`-t "R27"` each 1 passed/26 skipped. Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to LOCKED via ADR-017 Path B (WS-002/IB-002 >= ACCEPTED; linked AEs AE-001/AE-005/AE-006 at ACCEPTED — no status inversion). | Claude (land agent, engineer-directed) |
 | 2026-07-16 | Substantive | ADR-017 Path B re-lock: amendment R26/R27 green from main | 60890286+jeffhaskin@users.noreply.github.com |
+| 2026-07-16 | Substantive | dashboard vault-wide live-refresh completeness, user-directed 2026-07-16, full-auto authority | jeffhaskin1@gmail.com |
+| 2026-07-16 | Substantive | Amended scope (retroactive, engineer-directed completeness of INT-014 — NOT a new Intent): added dashboard vault-wide live-refresh to Desired Outcome, a 6th coverage row (Amendment 2), Outcome Verification, and the Verification predicate (intention-contract-r28). New store surface pinned: `ProjectStore.isProjectRelevantPath(path)` — vault-wide predicate (true for a `pm-project: true` file via metadataCache OR a markdown file under a known project's dir / `<Name>_tasks` folder, regardless of the global folder). DashboardView refresh guard routed through it. Guarded red-first by `src/intention.test.ts` R28 (authored in parallel; already RED in the working tree). WS-002 + IB-002 amended in lockstep with the delta. Status set to IMPLEMENTING (delta decomposed inline under delegated authority; analyze/decompose caps re-checked and still PASS). The implement + land workers re-lock via ADR-017 Path B once R28 is green. | Claude (dashboard-refresh worker, engineer-directed) |
+| 2026-07-16 | Substantive | Dashboard vault-wide live-refresh delta decomposed inline (WS-002 + IB-002 amended in lockstep); R28 RED in working tree. Re-lock via ADR-017 Path B once green. | Claude (dashboard-refresh worker, engineer-directed) |

@@ -19,6 +19,7 @@ _None yet — author the first one with `/write-intent`._
 | [INT-010](intents/INT-010-ui-composites.md) | UI Composite Components | documentation | manual | PROPOSED | AE-010 | 2026-07-16 | 2026-07-16 |
 | [INT-011](intents/INT-011-ui-primitives.md) | UI Primitives & Design System Styling | documentation | manual | PROPOSED | AE-011 | 2026-07-16 | 2026-07-16 |
 | [INT-012](intents/INT-012-view-orchestration.md) | Project/Dashboard View Orchestration | documentation | manual | PROPOSED | AE-012 | 2026-07-16 | 2026-07-16 |
+| [INT-014](intents/INT-014-per-project-directories.md) | Let each project declare its own vault directory | feature | manual | IMPLEMENTING | AE-001, AE-005, AE-006 | 2026-07-16 | 2026-07-16 |
 
 ## Archive
 
@@ -27,7 +28,6 @@ _None yet — author the first one with `/write-intent`._
 | Intent | Title | Type | Status | Superseded-By | Linked AEs | Modified |
 |---|---|---|---|---|---|---|
 | [INT-013](intents/INT-013-external-task-ingestion.md) | Ingest externally-authored task files with automatic ID backfill | feature | LOCKED |  | AE-001, AE-006 | 2026-07-16 |
-| [INT-014](intents/INT-014-per-project-directories.md) | Let each project declare its own vault directory | feature | LOCKED |  | AE-001, AE-005, AE-006 | 2026-07-16 |
 | [INT-015](intents/INT-015-bidirectional-renames.md) | Keep item names and their vault file/folder names in sync bidirectionally | feature | LOCKED |  | AE-001, AE-012, AE-006 | 2026-07-16 |
 | [INT-016](intents/INT-016-calendar-date-picker.md) | Replace plain-text date entry with an in-plugin calendar date picker | feature | LOCKED |  | AE-011, AE-005 | 2026-07-16 |
 | [INT-017](intents/INT-017-self-describing-palettes.md) | Materialize each project's resolved status/priority palette into its own frontmatter | feature | LOCKED |  | AE-001 | 2026-07-16 |

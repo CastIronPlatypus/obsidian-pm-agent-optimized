@@ -40,6 +40,7 @@ interface StoreProbe {
   ingestExternalTask?: (project: Project, file: TFile) => Promise<Task | null>
   discoverProjects?: () => Promise<Project[]>
   projectDirectory?: (project: Project) => string
+  isProjectRelevantPath?: (path: string) => boolean
   moveProject?: (project: Project, newDir: string) => Promise<void>
   renameProject?: (project: Project, newTitle: string) => Promise<void>
   handleExternalRename?: (oldPath: string, file: TFile) => Promise<void>
@@ -326,6 +327,54 @@ describe('Feature 2 — per-project directories', () => {
     const fm = await frontmatterOf(vault, project.filePath)
     expect(fm.path).toBe(spacedDir)
     expect(project.filePath).toBe(`${spacedDir}/Quarterly Plan.md`)
+  })
+
+  it('R28: dashboard refresh predicate is vault-wide, not folder-scoped', async () => {
+    // negative-control: the predicate hard-codes the global `projectsFolder`
+    // prefix, so a `pm-project: true` file filed in a custom category directory
+    // reads as irrelevant — the exact INT-014 completeness gap. Discovery went
+    // vault-wide, but the dashboard's live-refresh guard still only matched the
+    // global folder, so a project created ANYWHERE else appeared only on manual
+    // reload. The dashboard must route its refresh guard through a store predicate
+    // that answers "should the project dashboard refresh for this path?" the same
+    // vault-wide way discovery does.
+    const { store, vault, app } = newStore()
+
+    // A pm-project file filed OUTSIDE the global projects folder (a custom category dir).
+    const customPath = 'Areas/Community/Neighborhood Cleanup.md'
+    await vault.create(
+      customPath,
+      taskFileBody([
+        '---',
+        'pm-project: true',
+        'id: nc-1',
+        'title: Neighborhood Cleanup',
+        'taskIds: []',
+        '---',
+        '',
+        'body'
+      ])
+    )
+    // An unrelated markdown note that is NOT a project.
+    const notePath = 'Notes/Some Random Note.md'
+    await vault.create(notePath, taskFileBody(['---', 'title: Just a note', '---', '', 'not a project']))
+
+    // Obsidian populates metadataCache on create; teach the fake cache to report
+    // the custom-dir file as a project and the note as a plain file. (Cast away the
+    // strict CachedMetadata shape — the predicate only reads the pm-project flag.)
+    ;(app.metadataCache as unknown as { getFileCache: (f: TFile) => { frontmatter?: Record<string, unknown> } | null }).getFileCache =
+      (file: TFile) => (file.path === customPath ? { frontmatter: { 'pm-project': true } } : { frontmatter: {} })
+
+    const relevant = probe(store).isProjectRelevantPath
+    expect(relevant, 'ProjectStore.isProjectRelevantPath(path) must exist').toBeTypeOf('function')
+    if (!relevant) return
+
+    // The custom-dir project must be seen as dashboard-relevant even though it is
+    // NOT under the global projectsFolder ('Projects'): discovery is vault-wide, so
+    // the live-refresh guard must be too.
+    expect(relevant.call(store, customPath), 'a pm-project file in a custom dir must be dashboard-relevant').toBe(true)
+    // An unrelated note must NOT trigger a dashboard refresh.
+    expect(relevant.call(store, notePath), 'an unrelated note must not be dashboard-relevant').toBe(false)
   })
 })
 

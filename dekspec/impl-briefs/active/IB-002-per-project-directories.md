@@ -92,9 +92,31 @@ A project resolves its directory from a `path` frontmatter key (blank/absent →
 
 - The existing `renameProject`/`handleExternalRename`/`rebindRenamedProject` behavior (R12–R15) — `moveProject` **reuses** `rebindRenamedProject`, it does not alter it.
 
+## Amendment delta 2 (2026-07-16) — dashboard vault-wide live-refresh
+
+*Engineer-directed completeness of INT-014 (NOT a new Intent). Discovery went vault-wide (R9) but the DashboardView live-refresh guard still hard-codes the global `projectsFolder` prefix, so a `pm-project: true` file created/renamed/deleted in a custom category dir refreshes the dashboard only on manual reload. Proven red-first by R28 in `src/intention.test.ts`.*
+
+### Files to modify (delta)
+
+| File | Change |
+|------|--------|
+| `src/store/ProjectStore.ts` | Add `isProjectRelevantPath(path: string): boolean`. Return true if the path is a `pm-project: true` file (read `metadataCache.getFileCache(file)?.frontmatter[FRONTMATTER_KEY] === true`) OR a markdown file inside a known project's resolved directory or its `<Name>_tasks` folder (iterate the loaded `projectCache`, reuse `projectDirectory`/`projectTaskFolder` knowledge) — regardless of the global `projectsFolder`. Also honor the global-folder prefix so the pre-amendment behavior is preserved. Return false for unrelated notes. Reuse `discoverProjects`/`projectDirectory`; do not hard-code the global folder as the only source of truth. |
+| `src/store/TaskSource.ts` | Add `isProjectRelevantPath(path): boolean` to the interface so views program against it. |
+| `src/views/DashboardView.ts` | Replace the folder-prefix `isRelevant(path)` check with a delegation to `this.plugin.store.isProjectRelevantPath(path)`. Keep the 300ms debounce + `render()` on create/modify/delete/rename. |
+
+### Test plan (delta)
+
+- R28: a `pm-project: true` file filed OUTSIDE the global folder (`Areas/Community/Neighborhood Cleanup.md`, reported as a project via a stubbed `metadataCache.getFileCache`) is dashboard-relevant (`isProjectRelevantPath === true`); an unrelated note (`Notes/Some Random Note.md`) is NOT (`=== false`).
+- Colocated store unit tests: project file in a custom dir → true; task file under a custom-dir project's `_tasks` → true; unrelated note → false; a project under the global folder → still true.
+- Guard: full `pnpm test` stays green (R8–R27 unaffected).
+
+### Do not touch (delta 2)
+
+- `discoverProjects` / `projectDirectory` / `moveProject` / `renameProject` behavior — `isProjectRelevantPath` is a pure read predicate that reuses their knowledge, it does not alter them.
+
 ## Test Promotion Criteria
 
-Promotion refs: WS-002 Rules 1–4 (R8–R11 in `src/intention.test.ts`); WS-002 Rule 5 (R26–R27, amendment).
+Promotion refs: WS-002 Rules 1–4 (R8–R11 in `src/intention.test.ts`); WS-002 Rule 5 (R26–R27, amendment); WS-002 Rule 6 (R28, amendment 2).
 
 ## Done When
 
@@ -105,6 +127,8 @@ Promotion refs: WS-002 Rules 1–4 (R8–R11 in `src/intention.test.ts`); WS-002
 - [ ] Create-project modal exposes a destination-directory field seeded from settings — verified by manual check.
 - [ ] *(amendment)* `moveProject(project, newDir)` relocates the whole project folder + updates `path` (R26) and handles spaced directories (R27) — verified by intention test.
 - [ ] *(amendment)* The existing-project settings modal exposes an editable folder-path field that calls `moveProject` on save — verified by manual check.
+- [ ] *(amendment 2)* `isProjectRelevantPath(path)` is vault-wide: a `pm-project: true` file in a custom dir is relevant, an unrelated note is not (R28) — verified by intention test.
+- [ ] *(amendment 2)* DashboardView routes its live-refresh guard through `isProjectRelevantPath` — verified by delegation in `src/views/DashboardView.ts` + colocated store unit tests.
 - [ ] All pre-existing tests continue to pass — verified by full `pnpm test` run.
 
 ## Open Issues
@@ -117,3 +141,4 @@ None — no open issues.
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | IB authored at ACCEPTED under INT-014 `--decompose`. No dekbeads CLI present — bead-level work captured as the Done When task list above. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Added the "Amendment delta" section (editable folder path + `moveProject(project, newDir)` file plan, sequencing, test plan) and R26/R27 Done-When rows under INT-014 completeness. | Claude (Worker V01, engineer-directed) |
+| 2026-07-16 | Substantive | Added the "Amendment delta 2" section (dashboard vault-wide live-refresh: `isProjectRelevantPath(path)` file plan + DashboardView delegation, test plan) and R28 Done-When rows under INT-014 completeness. | Claude (dashboard-refresh worker, engineer-directed) |
