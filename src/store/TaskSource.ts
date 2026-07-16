@@ -32,6 +32,12 @@ export interface TaskSource {
   discoverProjects(): Promise<Project[]>
   /** The vault-relative directory a project lives in: its `path` frontmatter, else the file's parent folder. */
   projectDirectory(project: Project): string
+  /**
+   * Should the project dashboard refresh for this path? True vault-wide for a
+   * `pm-project: true` file (via metadataCache) anywhere, or a markdown file under
+   * a known project's directory / `<Name>_tasks` folder; false for unrelated notes.
+   */
+  isProjectRelevantPath(path: string): boolean
   loadProject(file: TFile): Promise<Project | null>
   loadTaskBody(task: Task): Promise<void>
   loadProjectBody(project: Project): Promise<void>

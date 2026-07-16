@@ -1055,3 +1055,48 @@ describe('ProjectStore external task ingestion', () => {
     expect((await fmOf(vault, path)).id).toBe('keep-me-123')
   })
 })
+
+describe('ProjectStore.isProjectRelevantPath (dashboard vault-wide live-refresh, R28)', () => {
+  it('a pm-project file in a custom dir (outside the global folder) is relevant', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('Cleanup', 'Areas/Community')
+    // The loaded project's own file is dashboard-relevant even though it lives
+    // OUTSIDE the global projects folder ('Projects').
+    expect(store.isProjectRelevantPath(project.filePath)).toBe(true)
+  })
+
+  it('a task file under a custom-dir project _tasks folder is relevant', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('Cleanup', 'Areas/Community')
+    const task = await addNamed(store, project, 'Sweep the park')
+    const taskPath = expectDefined(task.filePath)
+    expect(taskPath.startsWith('Areas/Community/Cleanup_tasks/')).toBe(true)
+    expect(store.isProjectRelevantPath(taskPath)).toBe(true)
+  })
+
+  it('an unrelated note is not relevant', async () => {
+    const { store, vault } = newStore()
+    await store.createProject('Cleanup', 'Areas/Community')
+    await vault.create('Notes/Random.md', 'not a project')
+    expect(store.isProjectRelevantPath('Notes/Random.md')).toBe(false)
+  })
+
+  it('a project under the global projects folder stays relevant', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('Legacy', 'Projects')
+    expect(store.isProjectRelevantPath(project.filePath)).toBe(true)
+  })
+
+  it('a not-yet-loaded pm-project file is relevant via metadataCache', async () => {
+    const { store, vault, app } = newStore()
+    const p = 'Areas/Solo/New Project.md'
+    await vault.create(
+      p,
+      ['---', 'pm-project: true', 'title: New Project', 'taskIds: []', '---', '', 'body'].join('\n')
+    )
+    ;(
+      app.metadataCache as unknown as { getFileCache: (f: TFile) => { frontmatter?: Record<string, unknown> } | null }
+    ).getFileCache = (file: TFile) => (file.path === p ? { frontmatter: { 'pm-project': true } } : { frontmatter: {} })
+    expect(store.isProjectRelevantPath(p)).toBe(true)
+  })
+})

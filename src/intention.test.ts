@@ -362,8 +362,10 @@ describe('Feature 2 — per-project directories', () => {
     // Obsidian populates metadataCache on create; teach the fake cache to report
     // the custom-dir file as a project and the note as a plain file. (Cast away the
     // strict CachedMetadata shape — the predicate only reads the pm-project flag.)
-    ;(app.metadataCache as unknown as { getFileCache: (f: TFile) => { frontmatter?: Record<string, unknown> } | null }).getFileCache =
-      (file: TFile) => (file.path === customPath ? { frontmatter: { 'pm-project': true } } : { frontmatter: {} })
+    ;(
+      app.metadataCache as unknown as { getFileCache: (f: TFile) => { frontmatter?: Record<string, unknown> } | null }
+    ).getFileCache = (file: TFile) =>
+      file.path === customPath ? { frontmatter: { 'pm-project': true } } : { frontmatter: {} }
 
     const relevant = probe(store).isProjectRelevantPath
     expect(relevant, 'ProjectStore.isProjectRelevantPath(path) must exist').toBeTypeOf('function')

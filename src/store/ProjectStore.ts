@@ -326,6 +326,37 @@ export class ProjectStore implements TaskSource {
     return idx > 0 ? fp.slice(0, idx) : ''
   }
 
+  /**
+   * Answer "should the project dashboard refresh for this path?" the same
+   * vault-wide way discovery finds projects (INT-014 amendment 2, R28). True when
+   * the path is a `pm-project: true` file (resolved via `metadataCache`) filed
+   * ANYWHERE in the vault, or a markdown file under a known (loaded) project's
+   * resolved directory / `<Name>_tasks` folder (so task-file changes still
+   * refresh), or under the global projects folder (preserves pre-amendment
+   * behavior). False for unrelated notes. Reuses `projectDirectory` /
+   * `projectTaskFolder`; the global folder is not the sole source of truth.
+   */
+  isProjectRelevantPath(path: string): boolean {
+    // 1. A pm-project file anywhere in the vault (synchronous metadataCache read).
+    const file = this.app.vault.getAbstractFileByPath(path)
+    if (file instanceof TFile) {
+      const cached = this.app.metadataCache.getFileCache(file)?.frontmatter
+      if (cached && cached[FRONTMATTER_KEY] === true) return true
+    }
+    // 2. Inside a known project's resolved directory or its `<Name>_tasks` folder.
+    for (const project of this.projectCache.values()) {
+      if (path === project.filePath) return true
+      const dir = this.projectDirectory(project)
+      if (dir && (path === dir || path.startsWith(`${dir}/`))) return true
+      const taskFolder = this.projectTaskFolder(project)
+      if (path === taskFolder || path.startsWith(`${taskFolder}/`)) return true
+    }
+    // 3. Under the global projects folder (preserve pre-amendment behavior).
+    const folder = this.getSettings().projectsFolder
+    if (folder && (path === folder || path.startsWith(`${folder}/`))) return true
+    return false
+  }
+
   async loadProject(file: TFile): Promise<Project | null> {
     const cachedProject = this.projectCache.get(file.path)
     if (cachedProject) return cachedProject
