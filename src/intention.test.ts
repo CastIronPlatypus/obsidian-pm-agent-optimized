@@ -553,3 +553,172 @@ describe('Feature 4 — custom calendar date picker', () => {
   // proven by R18's pinned ^\d{4}-\d{2}-\d{2}$ onChange contract. See worksheet R18/R21.
   it.skip('R21: dates stay YYYY-MM-DD strings', () => {})
 })
+
+// ─── Feature 5 — self-describing status palettes (INT-017, O6, M5) ───────────
+//
+// Project markdown must self-describe its legal status/priority vocabulary so an
+// AI reading only the file knows the allowed values. On every project save the
+// store materializes the RESOLVED palette (statuses + priorities via the
+// configFor fallback chain) into the project frontmatter `config.statuses` /
+// `config.priorities`, tagged `config.materialized: true`. That marker is the
+// round-trip-safety mechanic: a materialized block is informational (the
+// resolver ignores it and re-derives from the global palette, so later global
+// edits re-propagate), while a genuine user override (no `materialized: true`)
+// still wins through configFor unchanged. Ingestion validates an incoming
+// status/priority against the effective palette: blank → default (R4),
+// case-mismatch of a known id → canonical id, unknown value → preserved.
+
+/** Ids of the objects in `config.<key>` on a project's on-disk frontmatter. */
+function paletteIds(fm: Record<string, unknown>, key: 'statuses' | 'priorities'): string[] {
+  const cfg = fm.config as Record<string, unknown> | undefined
+  const list = cfg?.[key]
+  return Array.isArray(list) ? list.map((e) => String((e as { id?: unknown }).id)) : []
+}
+
+/** The `config.materialized` marker on a project's on-disk frontmatter, if any. */
+function materializedFlag(fm: Record<string, unknown>): unknown {
+  return (fm.config as Record<string, unknown> | undefined)?.materialized
+}
+
+describe('Feature 5: self-describing status palettes', () => {
+  it('R22: resolved palette materialized into project frontmatter on save', async () => {
+    // negative-control: project saved but frontmatter still lacks config.statuses.
+    const { store, vault } = newStore()
+    const project = await store.createProject('Palette Home', 'Projects')
+
+    // Effective palette = the configFor fallback chain (global settings here).
+    const effectiveStatuses = store.configFor(project).statuses.map((s) => s.id)
+    const effectivePriorities = store.configFor(project).priorities.map((p) => p.id)
+
+    // Forensic: the on-disk frontmatter now carries the resolved palette.
+    const disk = await frontmatterOf(vault, project.filePath)
+    expect(paletteIds(disk, 'statuses'), 'config.statuses must materialize the effective status ids').toEqual(
+      expect.arrayContaining(effectiveStatuses)
+    )
+    expect(paletteIds(disk, 'priorities')).toEqual(expect.arrayContaining(effectivePriorities))
+    // Round-trip-safety marker: a materialized block is tagged so the resolver
+    // does not misread it as a deliberate override.
+    expect(materializedFlag(disk)).toBe(true)
+  })
+
+  it('R23: legacy project (no config block) gains the materialized palette on first save', async () => {
+    // negative-control: legacy file stays bare (no config) after save.
+    const { store, vault } = newStore()
+    await vault.create(
+      'Projects/Legacy Palette.md',
+      taskFileBody([
+        '---',
+        'pm-project: true',
+        'id: legacy-pal-1',
+        'title: Legacy Palette',
+        'taskIds: []',
+        '---',
+        '',
+        'body'
+      ])
+    )
+    const project = await store.loadProject(fileAt(vault, 'Projects/Legacy Palette.md'))
+    expect(project).not.toBeNull()
+    if (!project) return
+
+    // Precondition: the legacy file has no config block yet.
+    const bare = await frontmatterOf(vault, project.filePath)
+    expect(bare.config, 'legacy fixture must start without a config block').toBeUndefined()
+
+    const effectiveStatuses = store.configFor(project).statuses.map((s) => s.id)
+    await store.saveProject(project)
+
+    // Forensic: the first save backfills the resolved palette into the bare file.
+    const disk = await frontmatterOf(vault, project.filePath)
+    expect(paletteIds(disk, 'statuses'), 'first save must backfill config.statuses').toEqual(
+      expect.arrayContaining(effectiveStatuses)
+    )
+    expect(materializedFlag(disk)).toBe(true)
+  })
+
+  it('R24: ingestion normalizes case-mismatched status id, preserves unknown values', async () => {
+    // negative-control: 'Todo' left unnormalized, or unknown 'blocked-ish' destroyed.
+    const { store, vault } = newStore()
+    const project = await store.createProject('Inbox', 'Projects')
+
+    const ingest = probe(store).ingestExternalTask
+    expect(ingest, 'ProjectStore.ingestExternalTask must exist').toBeTypeOf('function')
+    if (!ingest) return
+
+    // Case-mismatch of the known id 'todo' → normalized to the canonical id.
+    const casePath = 'Projects/Inbox_tasks/case-mismatch.md'
+    await vault.create(
+      casePath,
+      taskFileBody(['---', 'pm-task: true', 'title: Case', 'status: Todo', '---', '', 'body'])
+    )
+    const cased = await ingest.call(store, project, fileAt(vault, casePath))
+    expect(cased).not.toBeNull()
+    if (!cased) return
+    expect(cased.status, "case-mismatched 'Todo' must normalize to canonical 'todo'").toBe('todo')
+
+    // Unknown value → PRESERVED (never destroy AI/user data); the task still loads.
+    const unknownPath = 'Projects/Inbox_tasks/unknown-status.md'
+    await vault.create(
+      unknownPath,
+      taskFileBody(['---', 'pm-task: true', 'title: Unknown', 'status: blocked-ish', '---', '', 'body'])
+    )
+    const unknown = await ingest.call(store, project, fileAt(vault, unknownPath))
+    expect(unknown, 'a task with an unknown status must still load').not.toBeNull()
+    if (!unknown) return
+    expect(unknown.status, "unknown 'blocked-ish' must be preserved, not destroyed").toBe('blocked-ish')
+  })
+
+  it('R25: explicit per-project override still wins through configFor after materialization', async () => {
+    // negative-control (regression): override clobbered by the global palette on save.
+    const { app, vault } = makeFakeApp()
+    const localSettings: PMSettings = { ...DEFAULT_SETTINGS }
+    const store = new ProjectStore(app as unknown as App, () => localSettings)
+
+    // A genuine user override: a single custom status, and NO materialized marker.
+    await vault.create(
+      'Projects/Override.md',
+      taskFileBody([
+        '---',
+        'pm-project: true',
+        'id: override-1',
+        'title: Override',
+        'taskIds: []',
+        'config:',
+        '  statuses:',
+        '    - id: custom',
+        '      label: Custom',
+        '      color: "#123456"',
+        '      icon: ""',
+        '      complete: false',
+        '---',
+        '',
+        'body'
+      ])
+    )
+    const project = await store.loadProject(fileAt(vault, 'Projects/Override.md'))
+    expect(project).not.toBeNull()
+    if (!project) return
+
+    // Baseline: the override wins through configFor (global ids absent).
+    const before = store.configFor(project).statuses.map((s) => s.id)
+    expect(before, 'override must win before materialization').toContain('custom')
+    expect(before, 'global-only ids must not leak into an overridden palette').not.toContain('in-progress')
+
+    // Materialize via a save, then reload from disk.
+    await store.saveProject(project)
+    const reloaded = await store.loadProject(fileAt(vault, 'Projects/Override.md'))
+    expect(reloaded).not.toBeNull()
+    if (!reloaded) return
+
+    // Regression: the override still wins through configFor after the round-trip.
+    const after = store.configFor(reloaded).statuses.map((s) => s.id)
+    expect(after, 'override must still win through configFor after materialization').toContain('custom')
+    expect(after, 'materialization must not clobber the override with the global palette').not.toContain('in-progress')
+
+    // Forensic: the override block is NOT re-tagged as materialized (so it stays
+    // a deliberate override on the next round-trip).
+    const disk = await frontmatterOf(vault, reloaded.filePath)
+    expect(paletteIds(disk, 'statuses'), 'on-disk override must survive the save').toEqual(['custom'])
+    expect(materializedFlag(disk), 'a genuine override must not be flagged materialized').not.toBe(true)
+  })
+})
