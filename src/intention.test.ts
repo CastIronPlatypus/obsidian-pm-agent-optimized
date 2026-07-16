@@ -842,3 +842,230 @@ describe('Feature 5: self-describing status palettes', () => {
     expect(materializedFlag(disk), 'a genuine override must not be flagged materialized').not.toBe(true)
   })
 })
+
+// ─── Feature 6 — agent-authored ID authority (INT-018, O7, M6) ───────────────
+//
+// An AI agent can author a whole project — milestones, subtasks, dependencies —
+// directly as Markdown files with its OWN stable ids. Three cold-FOLDER-LOAD
+// gaps make that unsafe today (the live create/modify ingest path already mints,
+// but a project opened cold does not): (1) a blank/absent `id` is loaded as
+// undefined/'' instead of a minted, persisted id; (2) two files that share an id
+// silently last-wins in the task map (data loss); (3) an arbitrary id string is
+// used verbatim even though ids flow into slugs/filenames. INT-018 hardens the
+// load path so every task gets a stable, safe, unique id — minted/re-minted and
+// persisted back to disk (processFrontMatter + markSelfWrite) — without changing
+// association (still folder-based), the minted format, or forcing any id scheme.
+//
+// These requirements probe the COLD load path (`store.loadProject` on an on-disk
+// fixture), NOT the live-event `ingestExternalTask` path exercised by Feature 1.
+// `loadProject` already exists, so calling it never crashes — the RED failures
+// below are assertion failures against behavior that does not exist yet.
+//
+// Pinned id-validity rule (routing/WS contract): an id is VALID iff it matches
+//   ^[A-Za-z0-9._-]{1,64}$
+// (safe slug/filename charset, non-empty, at most 64 chars). An id that violates
+// this — path separators (`/`, `\`), whitespace, other punctuation, or length
+// > 64 — is treated exactly like a collision: normalized or re-minted, persisted,
+// and warned. A blank/absent id is minted. The kept-first / re-mint-collider
+// policy resolves duplicates without dropping data.
+
+/** A safe id must be usable verbatim as a slug/filename segment. */
+const ID_RULE = /^[A-Za-z0-9._-]{1,64}$/
+
+/** Depth-first flatten of a task tree (top-level + all descendants). */
+function flattenTree(tasks: Task[]): Task[] {
+  const out: Task[] = []
+  const walk = (list: Task[]): void => {
+    for (const t of list) {
+      out.push(t)
+      if (t.subtasks.length) walk(t.subtasks)
+    }
+  }
+  walk(tasks)
+  return out
+}
+
+/** Create a project .md + its `<Name>_tasks` folder marker on disk (no store call). */
+async function seedProjectFile(
+  vault: FakeVault,
+  dir: string,
+  name: string,
+  frontmatterLines: string[]
+): Promise<string> {
+  const projectPath = `${dir}/${name}.md`
+  await vault.create(projectPath, taskFileBody(['---', 'pm-project: true', ...frontmatterLines, '---', '', 'body']))
+  await vault.createFolder(`${dir}/${name}_tasks`)
+  return projectPath
+}
+
+describe('Feature 6 — agent-authored ID authority', () => {
+  it('R29: blank id minted and persisted on cold folder-load', async () => {
+    // negative-control (today's bug): a cold-loaded task with a blank/absent id
+    // stays undefined/'' in memory AND on disk — no id is minted or persisted, so
+    // the task cannot be stably referenced across reloads.
+    const { store, vault } = newStore()
+    const projectPath = await seedProjectFile(vault, 'Projects', 'Authored', [
+      'id: authored-1',
+      'title: Authored',
+      'taskIds: []'
+    ])
+    // Agent-authored task file with NO `id` key at all.
+    const taskPath = 'Projects/Authored_tasks/no-id.md'
+    await vault.create(taskPath, taskFileBody(['---', 'pm-task: true', 'title: Needs an id', '---', '', 'body']))
+
+    const project = await store.loadProject(fileAt(vault, projectPath))
+    expect(project).not.toBeNull()
+    if (!project) return
+
+    // The task loads (never dropped), located by its title since it has no id yet.
+    const loaded = flattenTree(project.tasks).find((t) => t.title === 'Needs an id')
+    expect(loaded, 'a blank-id task must still load').toBeDefined()
+    if (!loaded) return
+    // In-memory: a minted, non-empty id.
+    expect(typeof loaded.id).toBe('string')
+    expect(typeof loaded.id === 'string' ? loaded.id.length : 0).toBeGreaterThan(0)
+
+    // Forensic: the mint is persisted back into the file's frontmatter on disk.
+    const fm = await frontmatterOf(vault, taskPath)
+    expect(typeof fm.id, 'the minted id must be written back to disk').toBe('string')
+    expect(typeof fm.id === 'string' ? fm.id.length : 0).toBeGreaterThan(0)
+
+    // The backfill write must be self-marked so the resulting modify event is not
+    // re-ingested (no echo), exactly like the live ingest path (R7).
+    expect(store.consumeSelfWrite(taskPath)).toBe(true)
+  })
+
+  it('R30: duplicate ids both survive — collider re-minted, no silent drop', async () => {
+    // negative-control (today's bug): the second file's id silently overwrites the
+    // first in the task map (last-wins), so one task is dropped — data loss.
+    const { store, vault } = newStore()
+    const projectPath = await seedProjectFile(vault, 'Projects', 'Dupes', [
+      'id: dupes-1',
+      'title: Dupes',
+      'taskIds:',
+      '  - dup-1'
+    ])
+    const aPath = 'Projects/Dupes_tasks/a.md'
+    const bPath = 'Projects/Dupes_tasks/b.md'
+    await vault.create(aPath, taskFileBody(['---', 'pm-task: true', 'id: dup-1', 'title: First', '---', '', 'body']))
+    await vault.create(bPath, taskFileBody(['---', 'pm-task: true', 'id: dup-1', 'title: Second', '---', '', 'body']))
+
+    const project = await store.loadProject(fileAt(vault, projectPath))
+    expect(project).not.toBeNull()
+    if (!project) return
+
+    // Both agent-authored tasks must be present after load — neither dropped.
+    const all = flattenTree(project.tasks)
+    const first = all.find((t) => t.title === 'First')
+    const second = all.find((t) => t.title === 'Second')
+    expect(first, 'the first colliding task must not be silently dropped').toBeDefined()
+    expect(second, 'the second colliding task must not be silently dropped').toBeDefined()
+    if (!first || !second) return
+
+    // The collision is resolved by re-minting one of them to a distinct id.
+    expect(first.id, 'colliding ids must be made distinct').not.toBe(second.id)
+    // Keep-first policy: exactly one survivor retains the original id.
+    expect([first.id, second.id].filter((id) => id === 'dup-1').length).toBe(1)
+
+    // Forensic: the re-mint is persisted — the two files carry distinct, non-empty
+    // ids on disk (not both still 'dup-1').
+    const fmA = await frontmatterOf(vault, aPath)
+    const fmB = await frontmatterOf(vault, bPath)
+    expect(String(fmA.id), 'a.md must keep a non-empty id on disk').not.toBe('')
+    expect(String(fmB.id), 'b.md must keep a non-empty id on disk').not.toBe('')
+    expect(fmA.id, 'the persisted ids must be de-duplicated on disk').not.toBe(fmB.id)
+  })
+
+  it('R31: minting a nested child preserves its parent nesting', async () => {
+    // negative-control (today's bug): a parentId-referenced child with a blank id
+    // loads under its parent but keeps an undefined/'' id (not minted, not
+    // persisted), so the agent-authored nesting has no stable ids across reloads;
+    // a naive re-key on mint could also detach the child from its parent.
+    const { store, vault } = newStore()
+    const projectPath = await seedProjectFile(vault, 'Projects', 'Nested', [
+      'id: nested-1',
+      'title: Nested',
+      'taskIds:',
+      '  - ms-1'
+    ])
+    const parentPath = 'Projects/Nested_tasks/parent.md'
+    const childPath = 'Projects/Nested_tasks/child.md'
+    // Parent authored with a stable id; child references it via parentId but has
+    // NO id of its own (left for the plugin to mint).
+    await vault.create(
+      parentPath,
+      taskFileBody(['---', 'pm-task: true', 'id: ms-1', 'title: Milestone', '---', '', 'body'])
+    )
+    await vault.create(
+      childPath,
+      taskFileBody(['---', 'pm-task: true', 'parentId: ms-1', 'title: Subtask', '---', '', 'body'])
+    )
+
+    const project = await store.loadProject(fileAt(vault, projectPath))
+    expect(project).not.toBeNull()
+    if (!project) return
+
+    // Nesting: the child appears UNDER the parent (agent-authored parentId honored).
+    const parent = project.tasks.find((t) => t.title === 'Milestone')
+    expect(parent, 'the parent milestone must load').toBeDefined()
+    if (!parent) return
+    expect(parent.id, 'an explicit parent id must be preserved verbatim').toBe('ms-1')
+    const child = parent.subtasks.find((s) => s.title === 'Subtask')
+    expect(child, 'the child must remain nested under its parent after id minting').toBeDefined()
+    if (!child) return
+
+    // The nested child's blank id is minted (in memory + on disk) so the structure
+    // has stable ids across reloads.
+    expect(typeof child.id).toBe('string')
+    expect(typeof child.id === 'string' ? child.id.length : 0).toBeGreaterThan(0)
+    const childFm = await frontmatterOf(vault, childPath)
+    expect(typeof childFm.id === 'string' ? (childFm.id as string).length : 0).toBeGreaterThan(0)
+    // The nesting is durable: the child's persisted parentId still points at the parent.
+    expect(childFm.parentId, 'the persisted parentId must still resolve to the parent').toBe('ms-1')
+  })
+
+  it('R32: invalid/oversized ids are normalized, never used verbatim, load never crashes', async () => {
+    // negative-control (today's bug): the raw invalid id is used as-is — a path
+    // separator leaks into the slug/filename, and an oversized id is left untrimmed.
+    const { store, vault } = newStore()
+    const projectPath = await seedProjectFile(vault, 'Projects', 'Ids', ['id: ids-1', 'title: Ids', 'taskIds: []'])
+    // (a) an id containing a path separator — a direct slug/filename hazard.
+    const sepPath = 'Projects/Ids_tasks/sep.md'
+    await vault.create(
+      sepPath,
+      taskFileBody(['---', 'pm-task: true', 'id: epic/frontend', 'title: Path Sep', '---', '', 'body'])
+    )
+    // (b) an oversized id (> 64 chars) that violates the length cap.
+    const bigId = 'x'.repeat(300)
+    const bigPath = 'Projects/Ids_tasks/big.md'
+    await vault.create(
+      bigPath,
+      taskFileBody(['---', 'pm-task: true', `id: ${bigId}`, 'title: Oversized', '---', '', 'body'])
+    )
+
+    // Load must not crash on invalid ids.
+    const project = await store.loadProject(fileAt(vault, projectPath))
+    expect(project).not.toBeNull()
+    if (!project) return
+
+    const all = flattenTree(project.tasks)
+    const sep = all.find((t) => t.title === 'Path Sep')
+    const big = all.find((t) => t.title === 'Oversized')
+    expect(sep, 'a task with a path-separator id must still load').toBeDefined()
+    expect(big, 'a task with an oversized id must still load').toBeDefined()
+    if (!sep || !big) return
+
+    // The invalid ids are normalized/re-minted to the safe rule — never verbatim.
+    expect(sep.id, 'a path-separator id must not be used verbatim as a slug/filename').not.toContain('/')
+    expect(sep.id).not.toContain('\\')
+    expect(sep.id, 'the resolved id must satisfy the pinned id rule').toMatch(ID_RULE)
+    expect(big.id.length, 'an oversized id must be capped to the pinned max length').toBeLessThanOrEqual(64)
+    expect(big.id, 'the resolved id must satisfy the pinned id rule').toMatch(ID_RULE)
+
+    // Forensic: the safe ids are persisted back to disk (not left verbatim).
+    const sepFm = await frontmatterOf(vault, sepPath)
+    expect(String(sepFm.id), 'the path-separator id must be rewritten safely on disk').not.toContain('/')
+    const bigFm = await frontmatterOf(vault, bigPath)
+    expect(String(bigFm.id).length, 'the oversized id must be trimmed on disk').toBeLessThanOrEqual(64)
+  })
+})

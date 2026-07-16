@@ -7,6 +7,7 @@ _None yet — author the first one with `/write-intent`._
 
 | Intent | Title | Type | Autonomy | Status | Linked AEs | Created | Modified |
 |---|---|---|---|---|---|---|---|
+| [INT-018](intents/INT-018-agent-authored-id-authority.md) | Harden the cold-load path so an AI agent can author whole projects with its own stable ids | feature |  | IMPLEMENTING | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
 
 ## Archive
 
