@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -120,6 +120,16 @@ verification:
     cmd: vitest run src/intention.test.ts
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the per-project-directory work shipped on `main` via direct commits (no `int/` branch corpus, no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS/IC/IBs ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (255 passed, 1 skipped) |
+| intention-contract-r8-r11 | `vitest run src/intention.test.ts` | PASS (20 passed, 1 skipped) |
+
 ## Outcome Verification
 
 On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store resolves that project's directory to `Projects/Income/Q3-launch` (not the global folder), while a project with no `path` key resolves to its file's actual parent folder — both surfaced by discovery's vault-wide `pm-project: true` scan. Tested by the R8–R11 cases in `src/intention.test.ts` (authored in parallel); the R8 (contract), R9 (discovery), R10 (create-in-directory), and R11 (legacy fallback) assertions are the red-first outcome tests this Intent makes green.
@@ -129,6 +139,15 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 - [ ] Confirm the decision to *demote* the global projects-folder setting to a default rather than remove it outright (Desired Outcome assumes demote-to-default) — **Source:** initial draft — **Severity:** `P3`
 - [ ] Directory-picker UX for the modal path field (free-text vs folder suggester) is unspecified; defer concrete UX to the modal WS at `--decompose` — **Source:** initial draft — **Severity:** `P3`
 
+## Post-implementation sync
+
+*Synced 2026-07-16 (land step). Work merged to `main`; open-issue resolutions recorded below.*
+
+- [x] Global projects-folder setting **demoted** to a create-time default (not removed); discovery scans the vault for `pm-project: true` files. Legacy projects keep working via parent-folder fallback for a blank/absent `path`.
+- [x] Modal path field shipped as **plain text** (no folder suggester); autosuggest surfaced as a follow-up, not blocking.
+- [x] Verification predicate green from `main` (see Testpass results).
+- [x] Linked AEs (AE-001, AE-005, AE-006) at ACCEPTED — no status inversion remains.
+
 ## Amendment Log
 
 | Date | Type | Change | Author |
@@ -136,3 +155,5 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 | 2026-07-16 | Substantive | Intent authored at PROPOSED; inline `--analyze` performed against the pinned R8–R11 contract (Coverage/Size/Layer/Verification populated), acceptance pre-authorized by engineer in full-auto session. | Claude (intent-authoring agent) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 (recorded in Source / Amendment Log); that recording is the authorization cited here. No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (engineer-directed, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-002 + IB-002. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm test 255 passed/1 skipped; vitest src/intention.test.ts 20 passed/1 skipped R8-R11). Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (U12 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-002/IB-002 >= ACCEPTED. Linked AEs AE-001/AE-005/AE-006 at ACCEPTED. TESTPASS to LOCKED via /write-intent --lock. | Claude (U12 land agent) |

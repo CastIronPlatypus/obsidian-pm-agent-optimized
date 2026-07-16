@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 <!--
 Status is DRAFT by authoring-agent policy: creation defaults to DRAFT and the
@@ -136,6 +136,16 @@ verification:
     cmd: vitest run src/intention.test.ts
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the ingestion work shipped on `main` via direct commits (this repo has no `int/` branch corpus and no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS/IC/IBs ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (255 passed, 1 skipped) |
+| intention-contract-r1-r7 | `vitest run src/intention.test.ts` | PASS (20 passed, 1 skipped) |
+
 ## Outcome Verification
 
 The single user-observable outcome test: a well-formed `pm-task` file dropped into a loaded project's `<Name>_tasks/` folder with a blank `id` is, after ingestion, loaded into the project tree with a backfilled unique `id` written to disk and a slot in `taskIds`, and appears in the Table view. Asserted by the R1–R7 cases in `src/intention.test.ts` (authored in parallel; landed red-first per ADR-029 — the file is absent at analyze time, so the assertion starts red and is made green by the ingestion implementation). `outcome_verification_grandfathered: false`.
@@ -154,7 +164,12 @@ The single user-observable outcome test: a well-formed `pm-task` file dropped in
 
 ## Post-implementation sync
 
-- [ ] TBD — populate at --sync (post-merge)
+*Synced 2026-07-16 (land step). Work merged to `main`; no tail items outstanding.*
+
+- [x] Ingestion path implemented and wired to vault create/modify events (folded into the F3 live-event wiring at `registerCacheInvalidation`).
+- [x] Verification predicate green from `main` (see Testpass results).
+- [x] Linked AEs (AE-001, AE-006) raised to ACCEPTED so no status inversion remains.
+- [x] No frontmatter/layout schema changes shipped (Non-Goals held).
 
 ## Amendment Log
 
@@ -164,3 +179,5 @@ The single user-observable outcome test: a well-formed `pm-task` file dropped in
 | 2026-07-16 | Substantive | Analyze gate: closed Coverage/Size/Layer/Verification; added src/**/*.test.ts to confinement; all caps PASS. DRAFT to PROPOSED via /write-intent --analyze. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 (recorded in Source / Amendment Log); that recording is the authorization cited here. No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (engineer-directed, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-001 + IB-001. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm test 255 passed/1 skipped; vitest src/intention.test.ts 20 passed/1 skipped R1-R7). Branch-diff/bead gates N/A — work shipped on main, no int/ branch or dekbeads corpus. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (U12 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-001/IB-001 >= ACCEPTED. Linked AEs AE-001/AE-006 raised to ACCEPTED (status-inversion cleared). TESTPASS to LOCKED via /write-intent --lock. | Claude (U12 land agent) |

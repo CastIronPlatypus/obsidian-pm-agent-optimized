@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -136,6 +136,17 @@ verification:
     cmd: vitest run src/intention.test.ts
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the calendar-picker work shipped on `main` via direct commits (no `int/` branch corpus, no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS/IC/IBs ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| submission-lint-clean | `pnpm check:submission` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (255 passed, 1 skipped) |
+| intention-contract-r16-r20 | `vitest run src/intention.test.ts` | PASS (20 passed, 1 skipped) |
+
 ## Outcome Verification
 
 On a `CalendarPicker` opened at a known month, clicking the cell for a specific day emits an `onChange` payload equal to that day formatted `YYYY-MM-DD` (matching `^\d{4}-\d{2}-\d{2}$`), and the Sun–Sat weekday header renders in that exact order. This is the R16/R18 contract in `src/intention.test.ts`; the test lands red first (component absent), is made green by the `CalendarPicker` implementation, and no other test file is modified to make it pass. Precise test path/assertion names to be fixed at `--analyze` once `src/intention.test.ts` is landed.
@@ -153,7 +164,13 @@ On a `CalendarPicker` opened at a known month, clicking the cell for a specific 
 
 ## Post-implementation sync
 
-- [ ] TBD — populate at `--sync` after MERGED.
+*Synced 2026-07-16 (land step). Work merged to `main`; no tail items outstanding.*
+
+- [x] `CalendarPicker` primitive shipped: Sun–Sat grid, prev/next month buttons, plugin CSS classes only, emits `YYYY-MM-DD` (R16/R18).
+- [x] Wired through the `DateControl` choke point; native browser date input removed.
+- [x] Cataloged in `docs/styleguide.md` and `StyleguideView` in the same change.
+- [x] Verification predicate green from `main`, including `pnpm check:submission` (see Testpass results).
+- [x] Linked AEs (AE-011, AE-005) at ACCEPTED — no status inversion remains.
 
 ## Amendment Log
 
@@ -163,3 +180,5 @@ On a `CalendarPicker` opened at a known month, clicking the cell for a specific 
 | 2026-07-16 | Substantive | Analyze gate: closed Coverage/Size/Layer/Verification; 6-glob component cap accepted-with-justification (atomic UI-primitive-add surface, not split); all other caps PASS. DRAFT to PROPOSED via /write-intent --analyze. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 (recorded in Source / Amendment Log); that recording is the authorization cited here. No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (engineer-directed, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-004 + IB-004. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm check:submission exit 0; pnpm test 255 passed/1 skipped; vitest src/intention.test.ts 20 passed/1 skipped R16-R20). Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (U12 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-004/IB-004 >= ACCEPTED. Linked AEs AE-011/AE-005 at ACCEPTED. TESTPASS to LOCKED via /write-intent --lock. | Claude (U12 land agent) |

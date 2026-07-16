@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -128,6 +128,16 @@ verification:
     cmd: vitest run src/intention.test.ts
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the bidirectional-rename work shipped on `main` via direct commits (no `int/` branch corpus, no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS/IC/IBs ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (255 passed, 1 skipped) |
+| intention-contract-r12-r15 | `vitest run src/intention.test.ts` | PASS (20 passed, 1 skipped) |
+
 ## Outcome Verification
 
 On renaming a loaded project via the plugin, the project's folder exists at the new path and nothing remains at the old path — asserted against real filesystem state by `src/intention.test.ts` (R13). The inbound direction (R12) asserts that a vault `rename` event maps the old path to the loaded item and updates its name in memory and in its persisted title; R14 asserts the plugin-initiated rename marks a self-write so no second rename/write fires; R15 asserts renaming a `<Name>_tasks` folder keeps its tasks attached. These tests are authored in parallel in `src/intention.test.ts`; red-first (ADR-029) timing is to be confirmed at `--testpass`. This Intent is *not* grandfathered — `outcome_verification_grandfathered: false`.
@@ -149,7 +159,13 @@ On renaming a loaded project via the plugin, the project's folder exists at the 
 
 ## Post-implementation sync
 
-- [ ] TBD — populate at --sync (MERGED)
+*Synced 2026-07-16 (land step). Work merged to `main`; no tail items outstanding.*
+
+- [x] Both rename directions implemented (vault→plugin and plugin→vault) with echo-loop suppression gating on the NEW path self-write.
+- [x] Live event wiring landed in `registerCacheInvalidation` (works with no view open).
+- [x] Project file / `<Name>_tasks` folder rename kept consistent within one self-write suppression window (R15: tasks stay attached).
+- [x] Verification predicate green from `main` (see Testpass results).
+- [x] Linked AEs (AE-001, AE-006, AE-012) at ACCEPTED — no status inversion remains.
 
 ## Amendment Log
 
@@ -159,3 +175,5 @@ On renaming a loaded project via the plugin, the project's folder exists at the 
 | 2026-07-16 | Substantive | Analyze gate: closed Coverage/Size/Layer/Verification; P1 milestone question resolved (milestone = task with type:milestone, layout unchanged); component cap +1 accepted-with-justification (not split); plugin-level rename registration confirmed. DRAFT to PROPOSED via /write-intent --analyze. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 (recorded in Source / Amendment Log); that recording is the authorization cited here. No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (engineer-directed, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-003 + IB-003. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm test 255 passed/1 skipped; vitest src/intention.test.ts 20 passed/1 skipped R12-R15). Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (U12 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-003/IB-003 >= ACCEPTED. Linked AEs AE-001/AE-006/AE-012 at ACCEPTED. TESTPASS to LOCKED via /write-intent --lock. | Claude (U12 land agent) |
