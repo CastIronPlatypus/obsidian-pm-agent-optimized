@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -158,6 +158,19 @@ The editable-folder-path / move-on-save amendment (see Amendment Log) re-locks v
 | intention-contract-r26 | `vitest run src/intention.test.ts -t "R26"` | PASS (1 passed, 26 skipped) |
 | intention-contract-r27 | `vitest run src/intention.test.ts -t "R27"` | PASS (1 passed, 26 skipped) |
 
+### Testpass results — amendment 2 re-lock (2026-07-16)
+
+The dashboard vault-wide live-refresh amendment (see Amendment Log) re-locks via the same ADR-017 Path B precedent as the prior lands: work shipped on `main` via direct commits (RED commit `fd59ddb`, implementation commit `b5e8713`), no `int/` branch corpus or dekbeads tracker, so the branch-diff and bead-closure gates are N/A; WS-002 and IB-002 are ACCEPTED. The verification predicate — including the amendment's `intention-contract-r28` check — re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (280 passed, 1 skipped) |
+| intention-contract-r8-r11 | `vitest run src/intention.test.ts` | PASS |
+| intention-contract-r28 | `vitest run src/intention.test.ts -t "R28"` | PASS (1 passed, 27 skipped) |
+| check-submission | `pnpm check:submission` | PASS (exit 0) |
+| build | `pnpm build` | PASS (exit 0) |
+
 ## Outcome Verification
 
 On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store resolves that project's directory to `Projects/Income/Q3-launch` (not the global folder), while a project with no `path` key resolves to its file's actual parent folder — both surfaced by discovery's vault-wide `pm-project: true` scan. Tested by the R8–R11 cases in `src/intention.test.ts` (authored in parallel); the R8 (contract), R9 (discovery), R10 (create-in-directory), and R11 (legacy fallback) assertions are the red-first outcome tests this Intent makes green.
@@ -187,6 +200,12 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 - [x] Folder paths containing spaces (and unicode) are handled literally — files land at the exact spaced path and remain discoverable.
 - [x] Amendment verification green from `main`: `intention-contract-r26-r27` PASS (see amendment re-lock testpass table); full suite 274 passed / 1 skipped.
 
+*Amendment 2 sync (2026-07-16) — dashboard vault-wide live-refresh:*
+
+- [x] `ProjectStore.isProjectRelevantPath(path)` shipped (and declared on the `TaskSource` interface): a synchronous vault-wide predicate — true for a `pm-project: true` file (resolved via `metadataCache`) anywhere in the vault, or a markdown file under a known (loaded) project's resolved directory / `<Name>_tasks` folder; the global projects folder is honored as an additional match so pre-amendment behavior is preserved; false for unrelated notes.
+- [x] `src/views/DashboardView.ts` refresh guard (`isRelevant`) routed through `store.isProjectRelevantPath` instead of the old global-folder prefix check, keeping the 300ms debounce + render on create/modify/delete/rename.
+- [x] Amendment 2 verification green from `main`: `intention-contract-r28` PASS (1 passed, 27 skipped); full suite 280 passed / 1 skipped; `pnpm check`, `pnpm check:submission`, `pnpm build` each exit 0. Colocated store unit tests added in `src/store/ProjectStore.test.ts` (custom-dir project → true; task file under a custom-dir project's `_tasks` → true; unrelated note → false; global-folder project → still true; not-yet-loaded pm-project via metadataCache → true).
+
 ## Amendment Log
 
 | Date | Type | Change | Author |
@@ -202,4 +221,6 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 | 2026-07-16 | Substantive | ADR-017 Path B re-lock: amendment R26/R27 green from main | 60890286+jeffhaskin@users.noreply.github.com |
 | 2026-07-16 | Substantive | dashboard vault-wide live-refresh completeness, user-directed 2026-07-16, full-auto authority | jeffhaskin1@gmail.com |
 | 2026-07-16 | Substantive | Amended scope (retroactive, engineer-directed completeness of INT-014 — NOT a new Intent): added dashboard vault-wide live-refresh to Desired Outcome, a 6th coverage row (Amendment 2), Outcome Verification, and the Verification predicate (intention-contract-r28). New store surface pinned: `ProjectStore.isProjectRelevantPath(path)` — vault-wide predicate (true for a `pm-project: true` file via metadataCache OR a markdown file under a known project's dir / `<Name>_tasks` folder, regardless of the global folder). DashboardView refresh guard routed through it. Guarded red-first by `src/intention.test.ts` R28 (authored in parallel; already RED in the working tree). WS-002 + IB-002 amended in lockstep with the delta. Status set to IMPLEMENTING (delta decomposed inline under delegated authority; analyze/decompose caps re-checked and still PASS). The implement + land workers re-lock via ADR-017 Path B once R28 is green. | Claude (dashboard-refresh worker, engineer-directed) |
+| 2026-07-16 | Substantive | Amendment 2 implemented on `main` (RED commit `fd59ddb`, implementation commit `b5e8713`): `ProjectStore.isProjectRelevantPath(path)` (synchronous vault-wide predicate reusing `projectDirectory`/`projectTaskFolder`; global folder honored as an additional match) declared on `TaskSource` + DashboardView refresh guard routed through it. Amendment 2 predicate re-evaluated from `main`: `pnpm check` exit 0; `pnpm test` 280 passed/1 skipped; `vitest src/intention.test.ts -t "R28"` 1 passed/27 skipped; `pnpm check:submission` exit 0; `pnpm build` exit 0. Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to LOCKED via ADR-017 Path B (WS-002/IB-002 >= ACCEPTED; linked AEs AE-001/AE-005/AE-006 at ACCEPTED — no status inversion). | Claude (land agent, engineer-directed) |
 | 2026-07-16 | Substantive | Dashboard vault-wide live-refresh delta decomposed inline (WS-002 + IB-002 amended in lockstep); R28 RED in working tree. Re-lock via ADR-017 Path B once green. | Claude (dashboard-refresh worker, engineer-directed) |
+| 2026-07-16 | Substantive | ADR-017 Path B re-lock: amendment 2 R28 green from main (280 passed/1 skipped; check/check:submission/build exit 0). WS-002/IB-002 >= ACCEPTED. | jeffhaskin1@gmail.com |
