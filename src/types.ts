@@ -124,6 +124,14 @@ export interface ProjectConfig {
   autoSchedule?: boolean
   kanbanShowSubtasks?: boolean
   kanbanShowDescriptionPreview?: boolean
+  /**
+   * Marks a `config` block as a materialized snapshot of the resolved palette
+   * (written on every save) rather than a deliberate per-project override. When
+   * `true`, the resolver ignores this block's `statuses`/`priorities` and
+   * re-derives them from the global palette, so later global edits re-propagate.
+   * Absent/`false` ⇒ a genuine override that still wins through `configFor`.
+   */
+  materialized?: boolean
 }
 
 /**

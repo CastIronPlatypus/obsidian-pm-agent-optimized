@@ -104,6 +104,21 @@ function parentDirOf(path: string): string {
  * The in-memory Project.tasks tree is assembled on load from individual
  * task files and remains unchanged for views.
  */
+/**
+ * Validate an ingested status/priority against the effective palette:
+ *   - blank/absent → the supplied default id (R4),
+ *   - a case-variant of a known id → the canonical id (R24),
+ *   - an unknown value → preserved verbatim so nothing is destroyed (R24).
+ */
+function normalizePaletteValue(raw: unknown, palette: { id: string }[], defaultId: string): string {
+  if (typeof raw !== 'string' || raw.length === 0) return defaultId
+  const exact = palette.find((entry) => entry.id === raw)
+  if (exact) return exact.id
+  const lower = raw.toLowerCase()
+  const canonical = palette.find((entry) => entry.id.toLowerCase() === lower)
+  return canonical ? canonical.id : raw
+}
+
 export class ProjectStore implements TaskSource {
   /** Per-project promise chains to serialize concurrent saves */
   private saveQueues = new Map<string, Promise<void>>()
@@ -561,11 +576,11 @@ export class ProjectStore implements TaskSource {
             const fmDesc = frontmatter?.description
             project.description = typeof fmDesc === 'string' ? fmDesc : body.trim()
           }
-          return serializeProject(project, this.statusesFor(project))
+          return serializeProject(project, this.configFor(project))
         })
         this.hydratedBodies.add(project)
       } else {
-        const content = serializeProject(project, this.statusesFor(project))
+        const content = serializeProject(project, this.configFor(project))
         this.markSelfWrite(project.filePath)
         await this.app.vault.create(project.filePath, content)
         this.hydratedBodies.add(project)
@@ -783,8 +798,13 @@ export class ProjectStore implements TaskSource {
         return existing
       }
 
-      // Blank status/priority resolve to defaults inside mapRawToTask.
-      const { task, parentId } = hydrateTaskFromFile({ ...frontmatter, id }, body, filePath)
+      // Validate status/priority against the effective palette: blank → default,
+      // a case-variant of a known id → the canonical id, an unknown value →
+      // preserved verbatim (never destroy AI/user data — the task still loads).
+      const resolved = this.configFor(project)
+      const status = normalizePaletteValue(frontmatter.status, resolved.statuses, 'todo')
+      const priority = normalizePaletteValue(frontmatter.priority, resolved.priorities, 'medium')
+      const { task, parentId } = hydrateTaskFromFile({ ...frontmatter, id, status, priority }, body, filePath)
       task.id = id
       this.hydratedBodies.add(task)
 

@@ -151,6 +151,9 @@ function hydrateProjectConfig(raw: unknown): ProjectConfig | undefined {
   if (typeof r.kanbanShowDescriptionPreview === 'boolean') {
     config.kanbanShowDescriptionPreview = r.kanbanShowDescriptionPreview
   }
+  // The round-trip-safety marker: a materialized block is re-derived from the
+  // global palette by the resolver rather than treated as a deliberate override.
+  if (r.materialized === true) config.materialized = true
   return Object.keys(config).length ? config : undefined
 }
 

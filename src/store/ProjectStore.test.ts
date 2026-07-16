@@ -913,7 +913,12 @@ describe('per-project config', () => {
     expect(reloaded.config).toEqual(project.config)
   })
 
-  it('omits the frontmatter key when the project overrides nothing', async () => {
+  it('materializes the resolved palette (marker set) when the project overrides nothing', async () => {
+    // Feature 5 (INT-017): write-through materialization supersedes the old
+    // "omit an empty override block" behavior. An inheriting project now
+    // self-describes its palette in `config`, tagged `materialized: true`, but
+    // the marker keeps it re-derivable — the resolver still yields the global
+    // palette, so it behaves exactly like an inheriting project.
     const { store, vault, app } = newStore()
     const project = await store.createProject('Inherit', 'Projects')
     await store.saveProject(project)
@@ -921,9 +926,15 @@ describe('per-project config', () => {
     const store2 = new ProjectStore(app, () => SETTINGS)
     const file = vault.getAbstractFileByPath(project.filePath)
     if (!(file instanceof TFile)) throw new Error('project file missing')
-    expect(await vault.read(file)).not.toContain('config:')
+    const written = await vault.read(file)
+    expect(written).toContain('config:')
+    expect(written).toContain('materialized: true')
+
     const reloaded = expectDefined(await store2.loadProject(file))
-    expect(reloaded.config).toBeUndefined()
+    expect(reloaded.config?.materialized).toBe(true)
+    // A materialized block is not a deliberate override: the palette re-derives
+    // from the global settings.
+    expect(store2.configFor(reloaded).statuses).toEqual(STATUSES)
   })
 
   it('stamps completion using the project-defined complete flag', async () => {
