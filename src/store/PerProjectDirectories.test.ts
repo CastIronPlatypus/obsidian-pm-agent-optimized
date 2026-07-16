@@ -1,8 +1,8 @@
 import type { App } from 'obsidian'
-import { TFile } from 'obsidian'
+import { TFile, TFolder } from 'obsidian'
 import { describe, expect, it } from 'vitest'
 import { makeFakeApp, type FakeVault } from '../../test/fakeVault'
-import { DEFAULT_SETTINGS, type PMSettings } from '../types'
+import { DEFAULT_SETTINGS, makeTask, type PMSettings } from '../types'
 import { ProjectStore } from './ProjectStore'
 import { parseFrontmatter } from './YamlParser'
 
@@ -116,5 +116,99 @@ describe('per-project directories — vault-wide discovery', () => {
     await store.createProject('Anywhere', 'Somewhere/Else')
     const found = await store.loadAllProjects('Projects')
     expect(found.some((p) => p.filePath === 'Somewhere/Else/Anywhere.md')).toBe(true)
+  })
+})
+
+describe('per-project directories — moveProject (editable folder path)', () => {
+  it('creates intermediate folders when moving into a deep dir that does not exist yet', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Deep', 'Projects')
+    await store.insertTask(project, makeTask({ title: 'inner' }))
+
+    await store.moveProject(project, 'A/B/C/D')
+
+    expect(vault.getAbstractFileByPath('A/B/C/D/Deep.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('A/B/C/D/Deep_tasks')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Deep.md')).toBeNull()
+    expect(store.projectDirectory(project)).toBe('A/B/C/D')
+    expect(project.tasks[0]?.filePath?.startsWith('A/B/C/D/Deep_tasks/')).toBe(true)
+  })
+
+  it('is a no-op when the destination equals the current directory', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Steady', 'Projects')
+    await store.insertTask(project, makeTask({ title: 'x' }))
+    const beforeFilePath = project.filePath
+    const beforeTaskPath = project.tasks[0]?.filePath
+
+    await store.moveProject(project, 'Projects')
+
+    expect(project.filePath).toBe(beforeFilePath)
+    expect(project.tasks[0]?.filePath).toBe(beforeTaskPath)
+    expect(vault.getAbstractFileByPath('Projects/Steady.md')).toBeInstanceOf(TFile)
+  })
+
+  it('throws (without overwriting) when the destination .md is already occupied', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Clash', 'Projects')
+    // Pre-existing note occupies the target path.
+    await vault.create('Areas/Clash.md', ['---', 'title: squatter', '---', '', 'do not touch'].join('\n'))
+
+    await expect(store.moveProject(project, 'Areas')).rejects.toThrow(/already exists/i)
+
+    // Nothing moved; the squatter is intact, the project stays put.
+    expect(vault.getAbstractFileByPath('Projects/Clash.md')).toBeInstanceOf(TFile)
+    const squatter = await vault.cachedRead(fileAt(vault, 'Areas/Clash.md'))
+    expect(squatter).toContain('do not touch')
+    expect(store.projectDirectory(project)).toBe('Projects')
+  })
+
+  it('carries archived tasks and per-task attachments along with the move', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Portfolio', 'Projects')
+    const archived = makeTask({ title: 'done thing' })
+    await store.insertTask(project, archived)
+    // Drop an attachment beside the task, then archive it.
+    const attachmentDir = 'Projects/Portfolio_tasks/' + archived.id + '/attachments'
+    await vault.createFolder(attachmentDir)
+    await vault.create(attachmentDir + '/spec.txt', 'attachment body')
+    await store.archiveTask(project, archived.id)
+    expect(project.tasks[0]?.archived).toBe(true)
+
+    await store.moveProject(project, 'Areas/Archive Home')
+
+    // Archived file, its Archive subfolder, and the attachment all relocated.
+    expect(vault.getAbstractFileByPath('Areas/Archive Home/Portfolio_tasks/Archive')).toBeInstanceOf(TFolder)
+    const movedTaskPath = project.tasks[0]?.filePath ?? ''
+    expect(movedTaskPath.startsWith('Areas/Archive Home/Portfolio_tasks/Archive/')).toBe(true)
+    expect(vault.getAbstractFileByPath(movedTaskPath)).toBeInstanceOf(TFile)
+    expect(
+      vault.getAbstractFileByPath('Areas/Archive Home/Portfolio_tasks/' + archived.id + '/attachments/spec.txt')
+    ).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Projects/Portfolio_tasks')).toBeNull()
+  })
+
+  it('honors spaces and unicode in the destination path literally', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Café Plan', 'Projects')
+    await store.insertTask(project, makeTask({ title: 'crème' }))
+    const spacedDir = 'Zonă/Proiecte Café'
+
+    await store.moveProject(project, spacedDir)
+
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Café Plan.md`)).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Café Plan_tasks`)).toBeInstanceOf(TFolder)
+    expect(project.filePath).toBe(`${spacedDir}/Café Plan.md`)
+    const fm = await frontmatterOf(vault, project.filePath)
+    expect(fm.path).toBe(spacedDir)
+  })
+
+  it('self-marks moved paths so the vault rename events do not echo', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('Echoless', 'Projects')
+    await store.moveProject(project, 'Areas/Quiet')
+    // Mirrors renameProject's discipline: old + new project paths are consumable.
+    expect(store.consumeSelfWrite('Areas/Quiet/Echoless.md')).toBe(true)
+    expect(store.consumeSelfWrite('Projects/Echoless.md')).toBe(true)
   })
 })

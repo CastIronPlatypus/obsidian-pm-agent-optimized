@@ -112,12 +112,15 @@ export class ProjectModal extends Modal {
       titleInput.select()
     }, 50)
 
-    // ── Folder (new projects only) ────────────────────────────────────────────
-    // Destination directory for the project file, seeded from the global
-    // projects-folder default. Since INT-014 the setting is only this default;
-    // the chosen folder is persisted as the project's `path` frontmatter.
-    let directory = this.plugin.settings.projectsFolder
-    if (this.isNew) {
+    // ── Folder ────────────────────────────────────────────────────────────────
+    // Destination directory for the project file. For a new project this is
+    // seeded from the global projects-folder default; for an existing project it
+    // is seeded from the project's resolved directory, and editing it relocates
+    // the whole project folder on save (INT-014, moveProject). Since INT-014 the
+    // global setting is only the create-time default; the chosen folder is
+    // persisted as the project's `path` frontmatter.
+    let directory = this.isNew ? this.plugin.settings.projectsFolder : this.plugin.store.projectDirectory(this.project)
+    {
       const dirSection = el.createDiv('pm-project-modal-section')
       dirSection.createEl('label', { text: 'Folder', cls: 'pm-label' })
       const dirInput = dirSection.createEl('input', {
@@ -129,7 +132,12 @@ export class ProjectModal extends Modal {
       dirInput.addEventListener('input', () => {
         directory = dirInput.value
       })
-      dirSection.createDiv({ text: 'Vault folder this project lives in.', cls: 'pm-modal-hint' })
+      dirSection.createDiv({
+        text: this.isNew
+          ? 'Vault folder this project lives in.'
+          : 'Vault folder this project lives in. Changing it moves the project and its tasks.',
+        cls: 'pm-modal-hint'
+      })
     }
 
     // ── Color ─────────────────────────────────────────────────────────────────
@@ -324,6 +332,13 @@ export class ProjectModal extends Modal {
             this.project.path = folder
             this.project.filePath = `${folder}/${title.replace(/[\\/:*?"<>|]/g, '-')}.md`
             await this.plugin.store.ensureFolder(folder)
+          } else {
+            // Relocate the whole project folder first, so the remaining save writes
+            // to the moved filePath. No-op inside moveProject when unchanged.
+            const folder = directory.trim()
+            if (folder && folder !== this.plugin.store.projectDirectory(this.project)) {
+              await this.plugin.store.moveProject(this.project, folder)
+            }
           }
 
           await this.plugin.store.saveProject(this.project)

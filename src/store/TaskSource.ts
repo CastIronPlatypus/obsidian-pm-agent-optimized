@@ -61,6 +61,14 @@ export interface TaskSource {
    */
   renameProject(project: Project, newTitle: string): Promise<void>
   /**
+   * Re-point an already-created project's directory: move its `.md` file and
+   * `<Name>_tasks` folder (attachments + Archive included) under `newDir`, update the
+   * `path` frontmatter + resolved directory, and keep tasks attached. Self-marks the
+   * touched paths so the resulting vault rename events do not echo. No-op when `newDir`
+   * already is the project's directory; throws if the destination `.md` exists.
+   */
+  moveProject(project: Project, newDir: string): Promise<void>
+  /**
    * Map an inbound vault rename (old path → renamed file) onto the loaded item and
    * update its name in memory + persisted title; cascades a project's `<Name>_tasks`
    * folder so tasks stay attached. A no-op when the old path resolves to no loaded item.

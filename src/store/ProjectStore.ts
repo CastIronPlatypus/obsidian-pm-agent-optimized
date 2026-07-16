@@ -898,6 +898,49 @@ export class ProjectStore implements TaskSource {
   }
 
   /**
+   * Re-point an already-created project's directory (INT-014 amendment, R26/R27):
+   * move the whole project folder — the `<oldDir>/<Name>.md` file AND its
+   * `<oldDir>/<Name>_tasks` folder (attachments + Archive travel with it, since the
+   * vault folder-rename is recursive) — to live under `newDir`, leaving nothing at
+   * the old location. Updates the `path` frontmatter + resolved directory to
+   * `newDir` and re-points every task's filePath, keeping tasks attached. Mirrors
+   * `renameProject`'s self-write discipline (all touched paths marked up front, so
+   * the vault rename events these writes raise are consumed rather than echoed),
+   * but varies the DIRECTORY instead of the basename. A `newDir` with spaces is
+   * honored literally. No-op when `newDir` is already the project's directory;
+   * throws if the destination `.md` already exists.
+   */
+  async moveProject(project: Project, newDir: string): Promise<void> {
+    const oldPath = normalizePath(project.filePath)
+    const targetDir = normalizePath(newDir)
+    if (targetDir === normalizePath(this.projectDirectory(project))) return
+
+    const baseName = fileNameFromPath(oldPath)
+    const newPath = normalizePath(targetDir ? `${targetDir}/${baseName}.md` : `${baseName}.md`)
+    if (newPath === oldPath) return
+    if (this.app.vault.getAbstractFileByPath(newPath)) {
+      throw new Error(`A note named "${baseName}" already exists in "${targetDir}".`)
+    }
+
+    const oldTaskFolder = normalizePath(oldPath.replace(/\.md$/, '_tasks'))
+    const newTaskFolder = normalizePath(newPath.replace(/\.md$/, '_tasks'))
+    // Self-mark every path we're about to touch, before any write, so the whole
+    // move lands inside one suppression window (no echo loop, mirroring renameProject).
+    this.markSelfWrite(oldPath)
+    this.markSelfWrite(newPath)
+    this.markSelfWrite(oldTaskFolder)
+    this.markSelfWrite(newTaskFolder)
+
+    await this.ensureFolder(targetDir)
+    const file = this.app.vault.getAbstractFileByPath(oldPath)
+    if (file instanceof TFile) await this.app.fileManager.renameFile(file, newPath)
+    // Keep the declared `path` aligned with the new directory before the rebind
+    // persists it (rebindRenamedProject only re-derives `path` when it is defined).
+    project.path = targetDir
+    await this.rebindRenamedProject(project, oldPath, newPath, oldTaskFolder, newTaskFolder, project.title)
+  }
+
+  /**
    * Map an inbound vault `rename` event (old path → the renamed file) onto a
    * loaded item and update its name in memory + persisted title (R12). A
    * project-file rename cascades the `<Name>_tasks` folder rename and re-points
