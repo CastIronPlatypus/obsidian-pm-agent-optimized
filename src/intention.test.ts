@@ -51,7 +51,7 @@ function newStore(): { store: ProjectStore; vault: FakeVault; app: App } {
 }
 
 function probe(store: ProjectStore): StoreProbe {
-  return store as unknown as StoreProbe
+  return store
 }
 
 function fileAt(vault: FakeVault, path: string): TFile {
