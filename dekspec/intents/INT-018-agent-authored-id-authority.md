@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -142,6 +142,17 @@ verification:
     cmd: vitest run src/intention.test.ts
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the cold-load id-authority work shipped on `main` via direct commits (this repo has no `int/` branch corpus and no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS-006/IB-006 ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| submission-lint-clean | `pnpm check:submission` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (289 passed, 1 skipped) |
+| intention-contract-r29-r32 | `vitest run src/intention.test.ts` | PASS (31 passed, 1 skipped; the four R29–R32 cases via `vitest run src/intention.test.ts -t "Feature 6"` → 4 passed) |
+
 ## Outcome Verification
 
 On a project opened cold: a task file with no `id` loads with a minted id in memory and that id is written back to the file's frontmatter, self-write-marked (R29); two task files sharing `id: dup-1` both appear in the tree — one keeps `dup-1`, the other is re-minted to a distinct id, and both files carry distinct ids on disk (R30); a parentId-referenced child authored with a blank id is minted while remaining nested under its parent, and its persisted `parentId` still resolves to the parent (R31); a task whose id contains a path separator or exceeds 64 chars loads without crashing and its resolved id satisfies `^[A-Za-z0-9._-]{1,64}$` on disk (R32). These are the R29–R32 contracts in `src/intention.test.ts`; they land red-first (cold-load mint/dedup/validate absent) per ADR-029 and are made green by the implementation without weakening any other test. `outcome_verification_grandfathered: false`.
@@ -165,3 +176,5 @@ On a project opened cold: a task file with no `id` loads with a minted id in mem
 | 2026-07-16 | Substantive | Intent authored; inline `--analyze` performed against the pinned R29–R32 contract (Coverage/Size/Layer/Verification populated); id-validity rule (`^[A-Za-z0-9._-]{1,64}$`) and keep-first/re-mint collision policy pinned; 5-glob component cap accepted-with-justification (atomic cold-load-id-authority surface), all other caps PASS. Created at PROPOSED with acceptance pre-authorized by the engineer ("engineer-directed, full-auto authority 2026-07-16"). | Claude (INT-018 spec worker) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 ("engineer-directed, full-auto authority 2026-07-16", recorded in Source); that recording is the authorization cited here. No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (INT-018 spec worker, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-006 + IB-006. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. Intention-test contract (R29–R32) authored red-first in parallel. Implementation (TDD against R29–R32) and land handed to the coding session. | Claude (INT-018 spec worker) |
+| 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm check:submission exit 0; pnpm test 289 passed/1 skipped; vitest src/intention.test.ts 31 passed/1 skipped — Feature 6 R29–R32 = 4 passed). Branch-diff/bead gates N/A — work shipped on main, no int/ branch or dekbeads corpus. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (INT-018 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-006/IB-006 >= ACCEPTED. Linked AEs AE-001/AE-006 already ACCEPTED (no status inversion). TESTPASS to LOCKED via /write-intent --lock. | Claude (INT-018 land agent) |

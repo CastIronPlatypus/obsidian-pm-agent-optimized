@@ -7,7 +7,6 @@ _None yet — author the first one with `/write-intent`._
 
 | Intent | Title | Type | Autonomy | Status | Linked AEs | Created | Modified |
 |---|---|---|---|---|---|---|---|
-| [INT-018](intents/INT-018-agent-authored-id-authority.md) | Harden the cold-load path so an AI agent can author whole projects with its own stable ids | feature |  | IMPLEMENTING | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
 
 ## Archive
 
@@ -32,3 +31,4 @@ _None yet — author the first one with `/write-intent`._
 | [INT-015](intents/INT-015-bidirectional-renames.md) | Keep item names and their vault file/folder names in sync bidirectionally | feature | LOCKED |  | AE-001, AE-012, AE-006 | 2026-07-16 |
 | [INT-016](intents/INT-016-calendar-date-picker.md) | Replace plain-text date entry with an in-plugin calendar date picker | feature | LOCKED |  | AE-011, AE-005 | 2026-07-16 |
 | [INT-017](intents/INT-017-self-describing-palettes.md) | Materialize each project's resolved status/priority palette into its own frontmatter | feature | LOCKED |  | AE-001 | 2026-07-16 |
+| [INT-018](intents/INT-018-agent-authored-id-authority.md) | Harden the cold-load path so an AI agent can author whole projects with its own stable ids | feature | LOCKED |  | AE-001, AE-006 | 2026-07-16 |
