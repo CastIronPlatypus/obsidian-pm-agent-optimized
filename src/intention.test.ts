@@ -40,6 +40,7 @@ interface StoreProbe {
   ingestExternalTask?: (project: Project, file: TFile) => Promise<Task | null>
   discoverProjects?: () => Promise<Project[]>
   projectDirectory?: (project: Project) => string
+  moveProject?: (project: Project, newDir: string) => Promise<void>
   renameProject?: (project: Project, newTitle: string) => Promise<void>
   handleExternalRename?: (oldPath: string, file: TFile) => Promise<void>
 }
@@ -257,6 +258,74 @@ describe('Feature 2 — per-project directories', () => {
     expect(directoryOf).toBeTypeOf('function')
     if (!directoryOf) return
     expect(directoryOf.call(store, project)).toBe('Projects')
+  })
+
+  it('R26: moving an existing project relocates its file and tasks folder', async () => {
+    // negative-control: the `path` field changes but the project file / tasks
+    // folder stay at the old location, orphaning the tasks.
+    // Completeness of INT-014: the existing-project settings surface must be able
+    // to re-point a project's folder; on save the WHOLE project folder moves.
+    const { store, vault } = newStore()
+    const created = await store.createProject('Relocatable', 'Projects')
+    const project = await store.loadProject(fileAt(vault, created.filePath))
+    expect(project).not.toBeNull()
+    if (!project) return
+    await store.insertTask(project, makeTask({ title: 'attached' }))
+
+    const move = probe(store).moveProject
+    expect(move, 'ProjectStore.moveProject(project, newDir) must exist').toBeTypeOf('function')
+    if (!move) return
+    await move.call(store, project, 'Areas/Portfolio')
+
+    // Forensic: the project file + its `<Name>_tasks` folder now live under the
+    // new directory, and nothing remains at the old location.
+    expect(vault.getAbstractFileByPath('Areas/Portfolio/Relocatable.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Areas/Portfolio/Relocatable_tasks')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Relocatable.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Relocatable_tasks')).toBeNull()
+
+    // The task file moved with the folder (not orphaned at the old path).
+    const movedTaskPath = project.tasks[0]?.filePath ?? ''
+    expect(movedTaskPath.startsWith('Areas/Portfolio/Relocatable_tasks/')).toBe(true)
+    expect(vault.getAbstractFileByPath(movedTaskPath)).toBeInstanceOf(TFile)
+
+    // The persisted `path` frontmatter + resolved directory both track the new dir.
+    const fm = await frontmatterOf(vault, project.filePath)
+    expect(fm.path).toBe('Areas/Portfolio')
+    const directoryOf = probe(store).projectDirectory
+    expect(directoryOf).toBeTypeOf('function')
+    if (!directoryOf) return
+    expect(directoryOf.call(store, project)).toBe('Areas/Portfolio')
+  })
+
+  it('R27: moving a project into a directory with spaces is handled literally', async () => {
+    // negative-control: spaces truncate the path or split it into the wrong
+    // directory, so the files are not discoverable at the intended location.
+    const { store, vault } = newStore()
+    const created = await store.createProject('Quarterly Plan', 'Projects')
+    const project = await store.loadProject(fileAt(vault, created.filePath))
+    expect(project).not.toBeNull()
+    if (!project) return
+    await store.insertTask(project, makeTask({ title: 'line item' }))
+
+    const move = probe(store).moveProject
+    expect(move, 'ProjectStore.moveProject(project, newDir) must exist').toBeTypeOf('function')
+    if (!move) return
+    const spacedDir = 'Areas/Income Projects'
+    await move.call(store, project, spacedDir)
+
+    // Files land at the LITERAL spaced path (no truncation, no wrong split) and
+    // stay discoverable there; nothing is left behind at the old location.
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Quarterly Plan.md`)).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Quarterly Plan_tasks`)).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Quarterly Plan.md')).toBeNull()
+
+    const movedTaskPath = project.tasks[0]?.filePath ?? ''
+    expect(movedTaskPath.startsWith(`${spacedDir}/Quarterly Plan_tasks/`)).toBe(true)
+
+    const fm = await frontmatterOf(vault, project.filePath)
+    expect(fm.path).toBe(spacedDir)
+    expect(project.filePath).toBe(`${spacedDir}/Quarterly Plan.md`)
   })
 })
 

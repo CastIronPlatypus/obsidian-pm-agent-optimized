@@ -44,6 +44,7 @@ A project declares the directory it lives in via a vault-relative `path` frontma
 | Project `path` frontmatter | in | vault-relative string | project `.md` file | blank/absent → file's parent folder |
 | Discovered projects | in | `pm-project: true` files | `metadataCache` vault-wide scan | every such file is found regardless of folder |
 | `createProject(dir, …)` | in | caller-supplied directory | modal / command | file written under `dir`; `path` persisted |
+| `moveProject(project, newDir)` | in | new destination directory | existing-project settings modal | whole project folder (file + `<Name>_tasks/` incl. attachments + Archive) moved under `newDir`; `path` frontmatter updated; tasks stay attached; spaces honored literally |
 
 ### Dependencies
 
@@ -65,6 +66,7 @@ A project declares the directory it lives in via a vault-relative `path` frontma
 2. **general** A project with no `path` key resolves to its file's actual parent folder. (R11)
 3. **general** Discovery finds every `pm-project: true` file anywhere in the vault. (R9)
 4. **general** `createProject` writes the new project file into the caller-supplied directory and persists that directory as `path`. (R10)
+5. **general** *(amendment 2026-07-16)* Changing an already-created project's folder path via `moveProject(project, newDir)` relocates the whole project folder — the project file and its `<Name>_tasks/` folder (attachments and Archive included) — under `newDir`, leaves nothing at the old location, updates the project's `path` frontmatter and resolved `projectDirectory` to `newDir`, and keeps its tasks attached. (R26) A `newDir` containing spaces is honored literally — files land at the exact spaced path and stay discoverable. (R27)
 
 ## Failure Behavior
 
@@ -82,3 +84,4 @@ A project declares the directory it lives in via a vault-relative `path` frontma
 | Date | Type | Change | Author |
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | WS authored at ACCEPTED under INT-014 `--decompose` (acceptance criteria = R8–R11 in `src/intention.test.ts`). | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | Amended under INT-014 completeness (engineer-directed): added Business Rule 5 + the `moveProject(project, newDir)` data interface for the editable-folder-path / move-on-save capability. New acceptance criteria R26/R27 in `src/intention.test.ts`. | Claude (Worker V01, engineer-directed) |

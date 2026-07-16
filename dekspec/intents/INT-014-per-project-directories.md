@@ -2,7 +2,7 @@
 
 ## Status
 
-LOCKED
+IMPLEMENTING
 
 ## Intent type
 
@@ -50,6 +50,8 @@ Today the plugin treats one global "projects folder" setting as the single autho
 
 A project declares the directory it lives in via its own frontmatter, and the plugin honors it. Each project's file carries a vault-relative `path` key naming the directory that contains it; when that key is blank or absent, the project falls back to the actual parent folder of its file, so nothing that exists today breaks. Project discovery finds every `pm-project: true` file anywhere in the vault rather than only under a configured root. Creating a project lets the author choose the destination directory — both as a create-project modal field and as the persisted frontmatter — and the file is written there. The former global projects-folder setting survives only as the default value seeded into that new field, no longer as the one place projects may live.
 
+An author can also **re-point an already-created project's directory** after the fact: the existing-project settings/configure modal exposes an editable folder-path field, and on save — when the path changed — the plugin moves the whole project folder (the project file, its `<Name>_tasks/` folder, and everything under it: attachments and the Archive subfolder) so it now lives under the new folder path, and updates the project's `path` frontmatter to match. Folder names containing spaces are handled literally (the files land at the exact spaced path, discoverable afterward). This completes the reorganize-over-time promise the create-time path field only half-delivered: without a move surface on the existing-project modal, a user who restructures their vault hierarchy could set a project's directory only at creation, never afterward.
+
 ## Non-Goals
 
 - No automatic migration or bulk re-filing of existing projects into category subfolders — existing projects keep working in place (R11); reorganizing the tree is a manual, user-driven act this Intent merely stops obstructing.
@@ -67,7 +69,7 @@ The Desired Outcome above states the new behavior in user-observable terms: a pr
 
 - `src/store/ProjectStore.ts`
 - `src/store/TaskSource.ts`
-- `src/modals/ProjectModal.ts`
+- `src/modals/ProjectModal.ts` — amendment: the existing-project settings/configure modal path gains an editable folder-path field whose save moves the project folder.
 - `src/settings.ts`
 - `src/types.ts`
 
@@ -83,6 +85,7 @@ The Desired Outcome above states the new behavior in user-observable terms: a pr
 | Discovery is root-scoped; no vault-wide `pm-project: true` scan exists | analyze — contract R9 vs `ProjectStore` load path | Resolve in this Intent: scan `metadataCache` for `pm-project: true` anywhere | open |
 | `createProject` takes no directory argument; create-project modal has no path field | analyze — contract R10 vs `TaskSource`/`ProjectStore`/`ProjectModal` | Resolve in this Intent: thread a directory arg through `createProject` and add the modal field | open |
 | Regression risk: legacy projects under the default folder must keep loading | analyze — contract R11 | Resolve in this Intent via the fallback path; guarded by the parallel-authored `src/intention.test.ts` R11 case | open |
+| Amendment (2026-07-16): existing-project settings modal cannot re-point an already-created project's folder; no store surface moves a project's whole folder on a path change | amendment — completeness gap vs create-project-only path field | Resolve in this amendment: add `ProjectStore.moveProject(project, newDir)` (moves project file + `<Name>_tasks/` + attachments + Archive, updates `path` frontmatter, handles spaces) + an editable folder-path field on the existing-project settings modal that calls it on save; guarded by `src/intention.test.ts` R26/R27 | open |
 
 ## Size assessment
 
@@ -94,7 +97,7 @@ The Desired Outcome above states the new behavior in user-observable terms: a pr
 | Components affected | ≤ 3 | 3 (AE-001, AE-005, AE-006) | PASS |
 | New L1 artifacts (AEs) | ≤ 1 | 0 | PASS |
 | New + revised L2 artifacts (WSes + ICs) | ≤ 3 | TBD — set at `--decompose` | PASS |
-| Coverage gaps | ≤ 2 | 4 additive, all resolved-in-Intent | PASS (no deferrals) |
+| Coverage gaps | ≤ 2 | 5 additive (4 original + 1 amendment), all resolved-in-Intent | PASS (no deferrals) |
 
 ## Layer impact analysis
 
@@ -118,6 +121,11 @@ verification:
     cmd: pnpm test
   - name: intention-contract-r8-r11
     cmd: vitest run src/intention.test.ts
+  # Amendment (2026-07-16): the editable-folder-path / move-on-save scope is
+  # pinned by R26 (move relocates project file + tasks folder; path frontmatter
+  # updated) and R27 (spaced target folder handled literally).
+  - name: intention-contract-r26-r27
+    cmd: vitest run src/intention.test.ts
 ```
 
 ### Testpass results (2026-07-16)
@@ -133,6 +141,8 @@ Diff confinement: the per-project-directory work shipped on `main` via direct co
 ## Outcome Verification
 
 On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store resolves that project's directory to `Projects/Income/Q3-launch` (not the global folder), while a project with no `path` key resolves to its file's actual parent folder — both surfaced by discovery's vault-wide `pm-project: true` scan. Tested by the R8–R11 cases in `src/intention.test.ts` (authored in parallel); the R8 (contract), R9 (discovery), R10 (create-in-directory), and R11 (legacy fallback) assertions are the red-first outcome tests this Intent makes green.
+
+**Amendment (2026-07-16) — editable folder path + move on save.** On an already-created project, changing its folder path via `ProjectStore.moveProject(project, newDir)` relocates the project file AND its `<Name>_tasks/` folder (with attachments and Archive) to `newDir`, leaves nothing at the old location, updates the project's `path` frontmatter and `projectDirectory(project)` to `newDir`, and keeps its tasks attached at the new folder. A target directory containing spaces (e.g. `Areas/Income Projects`) is honored literally. These are the red-first outcome tests R26 (relocation + path update, tasks not orphaned) and R27 (spaced path handled literally) in `src/intention.test.ts`.
 
 ## Open Issues
 
@@ -157,3 +167,5 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-002 + IB-002. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm test 255 passed/1 skipped; vitest src/intention.test.ts 20 passed/1 skipped R8-R11). Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (U12 land agent) |
 | 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-002/IB-002 >= ACCEPTED. Linked AEs AE-001/AE-005/AE-006 at ACCEPTED. TESTPASS to LOCKED via /write-intent --lock. | Claude (U12 land agent) |
+| 2026-07-16 | Substantive | Unlocked LOCKED to PROPOSED to admit the committed-scope amendment below (engineer-directed, user-directed 2026-07-16, full-auto authority): the create-project modal ships a folder-path field but the existing-project settings/configure modal has no way to re-point an already-created project's folder. Blast radius surfaced: WS-002 (ACCEPTED), IB-002 (ACCEPTED). | jeffhaskin1@gmail.com |
+| 2026-07-16 | Substantive | Amended scope (retroactive, engineer-directed completeness of INT-014 — NOT a new Intent): added the editable-folder-path / move-on-save capability to Desired Outcome, Components (existing-project settings modal), a 5th coverage row, Outcome Verification, and the Verification predicate (intention-contract-r26-r27). New store surface pinned: `ProjectStore.moveProject(project, newDir)` — moves the whole project folder (project file + `<Name>_tasks/` incl. attachments + Archive) on a path change, updates `path` frontmatter, handles spaces. Guarded red-first by `src/intention.test.ts` R26/R27 (authored this change). WS-002 + IB-002 amended in lockstep with the delta. Status set to IMPLEMENTING (delta already decomposed inline under delegated authority; the analyze/decompose caps re-checked and still PASS). The next (implement) + land workers re-lock via ADR-017 Path B once R26/R27 are green. | Claude (Worker V01, engineer-directed) |
