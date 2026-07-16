@@ -1100,3 +1100,164 @@ describe('ProjectStore.isProjectRelevantPath (dashboard vault-wide live-refresh,
     expect(store.isProjectRelevantPath(p)).toBe(true)
   })
 })
+
+// ─── INT-018: agent-authored id authority on cold folder-load ────────────────
+
+describe('ProjectStore cold-load id authority', () => {
+  function fileAt(vault: FakeVault, path: string): TFile {
+    const file = vault.getAbstractFileByPath(path)
+    if (!(file instanceof TFile)) throw new Error(`expected a file at ${path}`)
+    return file
+  }
+
+  async function seedProject(vault: FakeVault, dir: string, name: string, fmLines: string[]): Promise<TFile> {
+    const projectPath = `${dir}/${name}.md`
+    await vault.create(projectPath, ['---', 'pm-project: true', ...fmLines, '---', '', 'body'].join('\n'))
+    await vault.createFolder(`${dir}/${name}_tasks`)
+    return fileAt(vault, projectPath)
+  }
+
+  async function fmAt(vault: FakeVault, path: string): Promise<Record<string, unknown>> {
+    return parseFrontmatter(await vault.cachedRead(fileAt(vault, path))).frontmatter ?? {}
+  }
+
+  const ID_RULE = /^[A-Za-z0-9._-]{1,64}$/
+
+  it('mints a blank id, persists it, and it stays stable across reload', async () => {
+    const { store, vault } = newStore()
+    const projectFile = await seedProject(vault, 'Projects', 'Blank', ['id: blank-1', 'title: Blank', 'taskIds: []'])
+    await vault.create(
+      'Projects/Blank_tasks/no-id.md',
+      ['---', 'pm-task: true', 'title: No id', '---', '', 'body'].join('\n')
+    )
+
+    const project = expectDefined(await store.loadProject(projectFile))
+    const loaded = expectDefined(flattenTasks(project.tasks).find((f) => f.task.title === 'No id')).task
+    expect(loaded.id.length).toBeGreaterThan(0)
+    const mintedId = loaded.id
+
+    const disk = await fmAt(vault, 'Projects/Blank_tasks/no-id.md')
+    expect(disk.id).toBe(mintedId)
+
+    // Reload from a fresh store: the persisted id is reused, not re-minted.
+    const store2 = new ProjectStore((store as unknown as { app: App }).app, () => SETTINGS)
+    const reloaded = expectDefined(await store2.loadProject(projectFile))
+    const again = expectDefined(flattenTasks(reloaded.tasks).find((f) => f.task.title === 'No id')).task
+    expect(again.id).toBe(mintedId)
+  })
+
+  it('resolves a 3-way id collision keep-first, persisting distinct ids', async () => {
+    const { store, vault } = newStore()
+    const projectFile = await seedProject(vault, 'Projects', 'Three', [
+      'id: three-1',
+      'title: Three',
+      'taskIds:',
+      '  - dup'
+    ])
+    for (const name of ['a', 'b', 'c']) {
+      await vault.create(
+        `Projects/Three_tasks/${name}.md`,
+        ['---', 'pm-task: true', 'id: dup', `title: T-${name}`, '---', '', 'body'].join('\n')
+      )
+    }
+
+    const project = expectDefined(await store.loadProject(projectFile))
+    const ids = flattenTasks(project.tasks)
+      .filter((f) => f.task.title.startsWith('T-'))
+      .map((f) => f.task.id)
+    expect(ids).toHaveLength(3)
+    expect(new Set(ids).size, 'all three colliding tasks must get distinct ids').toBe(3)
+    expect(ids.filter((id) => id === 'dup').length, 'exactly one survivor keeps the original id').toBe(1)
+    for (const id of ids) expect(id).toMatch(ID_RULE)
+
+    const diskIds = await Promise.all(
+      ['a', 'b', 'c'].map(async (name) => String((await fmAt(vault, `Projects/Three_tasks/${name}.md`)).id))
+    )
+    expect(new Set(diskIds).size, 'the de-dup must be persisted on disk').toBe(3)
+  })
+
+  it('re-mints an invalid id even when a valid duplicate is present', async () => {
+    const { store, vault } = newStore()
+    const projectFile = await seedProject(vault, 'Projects', 'Mixed', [
+      'id: mixed-1',
+      'title: Mixed',
+      'taskIds:',
+      '  - keep'
+    ])
+    // A valid id and its duplicate, plus a path-separator invalid id.
+    await vault.create(
+      'Projects/Mixed_tasks/keep.md',
+      ['---', 'pm-task: true', 'id: keep', 'title: Keeper', '---', '', 'body'].join('\n')
+    )
+    await vault.create(
+      'Projects/Mixed_tasks/dupe.md',
+      ['---', 'pm-task: true', 'id: keep', 'title: Duplicate', '---', '', 'body'].join('\n')
+    )
+    await vault.create(
+      'Projects/Mixed_tasks/bad.md',
+      ['---', 'pm-task: true', 'id: epic/frontend', 'title: Invalid', '---', '', 'body'].join('\n')
+    )
+
+    const project = expectDefined(await store.loadProject(projectFile))
+    const flat = flattenTasks(project.tasks)
+    const keeper = expectDefined(flat.find((f) => f.task.title === 'Keeper')).task
+    const dupe = expectDefined(flat.find((f) => f.task.title === 'Duplicate')).task
+    const invalid = expectDefined(flat.find((f) => f.task.title === 'Invalid')).task
+
+    expect(keeper.id).toBe('keep')
+    expect(dupe.id).not.toBe('keep')
+    expect(invalid.id).not.toContain('/')
+    for (const t of [keeper, dupe, invalid]) expect(t.id).toMatch(ID_RULE)
+    expect(new Set([keeper.id, dupe.id, invalid.id]).size).toBe(3)
+
+    expect(String((await fmAt(vault, 'Projects/Mixed_tasks/bad.md')).id)).not.toContain('/')
+  })
+
+  it('a project file with a blank id still loads (projects are not minted)', async () => {
+    const { store, vault } = newStore()
+    // No `id` key on the project frontmatter at all.
+    const projectFile = await seedProject(vault, 'Projects', 'NoProjectId', ['title: No Project Id', 'taskIds: []'])
+    const project = expectDefined(await store.loadProject(projectFile))
+    expect(project.title).toBe('No Project Id')
+    expect(project.id.length).toBeGreaterThan(0)
+  })
+
+  it('a child whose parentId points at a re-minted collider stays nested under the kept parent', async () => {
+    const { store, vault } = newStore()
+    const projectFile = await seedProject(vault, 'Projects', 'Nest', [
+      'id: nest-1',
+      'title: Nest',
+      'taskIds:',
+      '  - p1'
+    ])
+    // Two parents share id 'p1' (keep-first: parent-a keeps it, parent-b re-minted).
+    await vault.create(
+      'Projects/Nest_tasks/parent-a.md',
+      ['---', 'pm-task: true', 'id: p1', 'title: Parent A', '---', '', 'body'].join('\n')
+    )
+    await vault.create(
+      'Projects/Nest_tasks/parent-b.md',
+      ['---', 'pm-task: true', 'id: p1', 'title: Parent B', '---', '', 'body'].join('\n')
+    )
+    // The child references the shared id — must resolve to the kept-first parent.
+    await vault.create(
+      'Projects/Nest_tasks/child.md',
+      ['---', 'pm-task: true', 'parentId: p1', 'title: Child', '---', '', 'body'].join('\n')
+    )
+
+    const project = expectDefined(await store.loadProject(projectFile))
+    const flat = flattenTasks(project.tasks)
+    expect(
+      flat.find((f) => f.task.title === 'Parent A'),
+      'parent A survives'
+    ).toBeDefined()
+    expect(
+      flat.find((f) => f.task.title === 'Parent B'),
+      'parent B survives'
+    ).toBeDefined()
+    const kept = expectDefined(flat.find((f) => f.task.id === 'p1')).task
+    const child = expectDefined(kept.subtasks.find((s) => s.title === 'Child'))
+    expect(child.title).toBe('Child')
+    expect(child.id.length).toBeGreaterThan(0)
+  })
+})

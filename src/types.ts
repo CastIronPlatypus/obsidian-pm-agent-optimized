@@ -223,6 +223,18 @@ export function makeId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }
 
+/**
+ * A task/project id is VALID iff it is filename/slug-safe, non-empty, and at
+ * most 64 chars. Ids flow into slugs and filenames, so the charset must be
+ * bounded — an id violating this is minted/re-minted on load (INT-018).
+ */
+export const ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/
+
+/** True when `id` is a non-empty, filename-safe id (see {@link ID_PATTERN}). */
+export function isValidId(id: unknown): id is string {
+  return typeof id === 'string' && ID_PATTERN.test(id)
+}
+
 export function makeTask(overrides: Partial<Task> = {}): Task {
   const now = new Date().toISOString()
   return {

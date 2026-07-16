@@ -1019,7 +1019,7 @@ describe('Feature 6 — agent-authored ID authority', () => {
     expect(typeof child.id).toBe('string')
     expect(typeof child.id === 'string' ? child.id.length : 0).toBeGreaterThan(0)
     const childFm = await frontmatterOf(vault, childPath)
-    expect(typeof childFm.id === 'string' ? (childFm.id as string).length : 0).toBeGreaterThan(0)
+    expect(typeof childFm.id === 'string' ? childFm.id.length : 0).toBeGreaterThan(0)
     // The nesting is durable: the child's persisted parentId still points at the parent.
     expect(childFm.parentId, 'the persisted parentId must still resolve to the parent').toBe('ms-1')
   })

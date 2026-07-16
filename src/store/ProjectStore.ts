@@ -1,7 +1,7 @@
 import type { Plugin, TAbstractFile } from 'obsidian'
 import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian'
 import type { PMSettings, Project, ResolvedProjectConfig, StatusConfig, Task } from '../types'
-import { DEFAULT_SETTINGS, makeId, makeProject, makeTask } from '../types'
+import { DEFAULT_SETTINGS, isValidId, makeId, makeProject, makeTask } from '../types'
 import { today } from '../dates'
 import { isTerminalStatus } from '../utils'
 import { archiveTask as doArchiveTask, unarchiveTask as doUnarchiveTask } from './ArchiveOps'
@@ -52,6 +52,35 @@ function patchNeedsBodyRewrite(patch: Partial<Task>): boolean {
 
 /** A basename of this exact length that prefixes the title's slug is kept as-is. */
 const LEGACY_SLUG_CAP = 40
+
+/**
+ * Decide the authoritative id for a task loaded from disk (INT-018). A blank id
+ * is minted; an id failing the safety rule ({@link isValidId}) is re-minted; an
+ * id already claimed by an earlier task in the same load is re-minted (keep-first
+ * — the collider moves, not the incumbent). `claimed` is mutated to record the
+ * resolved id. `reason` reports what forced the change ('blank' minting is
+ * routine; 'invalid'/'collision' are surfaced to the user).
+ */
+function authorizeTaskId(
+  rawId: string,
+  claimed: Set<string>
+): { id: string; reason: 'kept' | 'blank' | 'invalid' | 'collision' } {
+  let reason: 'kept' | 'blank' | 'invalid' | 'collision' = 'kept'
+  let id = rawId
+  if (!id) {
+    id = makeId()
+    reason = 'blank'
+  } else if (!isValidId(id)) {
+    id = makeId()
+    reason = 'invalid'
+  }
+  while (claimed.has(id)) {
+    id = makeId()
+    if (reason === 'kept') reason = 'collision'
+  }
+  claimed.add(id)
+  return { id, reason }
+}
 
 /**
  * Pick a save path. New tasks get the bare slug; an existing file is left where
@@ -431,16 +460,54 @@ export class ProjectStore implements TaskSource {
     collect(folder)
 
     const results = await Promise.all(files.map((file) => this.loadTaskFile(file)))
+
+    // Id authority (INT-018): every cold-loaded task gets a stable, safe, unique
+    // id before it is used as a map key or for nesting. A blank id is minted; an
+    // id failing the safety rule is re-minted; a duplicate is resolved keep-first
+    // (the first-loaded keeps the id, the collider is re-minted). Every mint is
+    // persisted back to disk (processFrontMatter, self-write-marked so the modify
+    // event it raises is not re-ingested). References to a re-minted id (parentId,
+    // subtaskIds of a re-minted invalid id) are remapped so nesting survives.
+    const claimed = new Set<string>()
+    const idRemap = new Map<string, string>()
+    let reminted = 0
+    const pending: { task: Task; subtaskIds: string[]; parentId: string | null }[] = []
     for (let i = 0; i < files.length; i++) {
       const { task, subtaskIds, parentId } = results[i]
-      if (task) {
-        if (files[i].path.startsWith(archivePrefix)) {
-          task.archived = true
-        }
-        taskMap.set(task.id, task)
-        if (subtaskIds.length) subtaskIdsMap.set(task.id, subtaskIds)
-        if (parentId) parentIdMap.set(task.id, parentId)
+      if (!task) continue
+      const rawId = typeof task.id === 'string' ? task.id : ''
+      const { id: authId, reason } = authorizeTaskId(rawId, claimed)
+      if (authId !== rawId) {
+        // A non-blank id that changed (invalid → re-minted) is remapped so any
+        // child referencing the old id still resolves. A collision is NOT
+        // remapped: references to the shared id resolve to the kept-first task.
+        if (reason === 'invalid' && rawId) idRemap.set(rawId, authId)
+        task.id = authId
+        this.markSelfWrite(files[i].path)
+        await this.app.fileManager.processFrontMatter(files[i], (fm: Record<string, unknown>) => {
+          fm.id = authId
+        })
+        if (reason !== 'blank') reminted++
       }
+      if (files[i].path.startsWith(archivePrefix)) {
+        task.archived = true
+      }
+      taskMap.set(task.id, task)
+      pending.push({ task, subtaskIds, parentId })
+    }
+    for (const { task, subtaskIds, parentId } of pending) {
+      if (subtaskIds.length) {
+        subtaskIdsMap.set(
+          task.id,
+          subtaskIds.map((sid) => idRemap.get(sid) ?? sid)
+        )
+      }
+      if (parentId) parentIdMap.set(task.id, idRemap.get(parentId) ?? parentId)
+    }
+    if (reminted > 0) {
+      new Notice(
+        `Project Manager: re-minted ${reminted} duplicate/invalid task id${reminted === 1 ? '' : 's'} in "${folderPath}".`
+      )
     }
 
     for (const [taskId, sids] of subtaskIdsMap) {
@@ -817,9 +884,10 @@ export class ProjectStore implements TaskSource {
       const { frontmatter, body } = parseFrontmatter(content)
       if (!frontmatter || frontmatter[TASK_FRONTMATTER_KEY] !== true) return null
 
-      // Backfill a unique id first: a blank/absent id gets a freshly minted one.
+      // Backfill a safe unique id first: a blank/absent OR unsafe id (fails the
+      // filename-safe rule, INT-018) gets a freshly minted one.
       const rawId = frontmatter.id
-      const id = typeof rawId === 'string' && rawId.length > 0 ? rawId : makeId()
+      const id = isValidId(rawId) ? rawId : makeId()
 
       // Idempotent: a task the store already tracks under this id is not
       // re-added. Recover its filePath if it was cache-loaded without one.
