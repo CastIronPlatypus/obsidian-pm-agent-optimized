@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -138,6 +138,18 @@ Diff confinement: the per-project-directory work shipped on `main` via direct co
 | full-suite-green | `pnpm test` | PASS (255 passed, 1 skipped) |
 | intention-contract-r8-r11 | `vitest run src/intention.test.ts` | PASS (20 passed, 1 skipped) |
 
+### Testpass results — amendment re-lock (2026-07-16)
+
+The editable-folder-path / move-on-save amendment (see Amendment Log) re-locks via the same ADR-017 Path B precedent as the original land: work shipped on `main` via direct commits (implementation commit `cf0f8fd`), no `int/` branch corpus or dekbeads tracker, so the branch-diff and bead-closure gates are N/A; WS-002 and IB-002 are ACCEPTED. The verification predicate — including the amendment's `intention-contract-r26-r27` check — re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (274 passed, 1 skipped) |
+| intention-contract-r8-r11 | `vitest run src/intention.test.ts` | PASS |
+| intention-contract-r26 | `vitest run src/intention.test.ts -t "R26"` | PASS (1 passed, 26 skipped) |
+| intention-contract-r27 | `vitest run src/intention.test.ts -t "R27"` | PASS (1 passed, 26 skipped) |
+
 ## Outcome Verification
 
 On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store resolves that project's directory to `Projects/Income/Q3-launch` (not the global folder), while a project with no `path` key resolves to its file's actual parent folder — both surfaced by discovery's vault-wide `pm-project: true` scan. Tested by the R8–R11 cases in `src/intention.test.ts` (authored in parallel); the R8 (contract), R9 (discovery), R10 (create-in-directory), and R11 (legacy fallback) assertions are the red-first outcome tests this Intent makes green.
@@ -158,6 +170,13 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 - [x] Verification predicate green from `main` (see Testpass results).
 - [x] Linked AEs (AE-001, AE-005, AE-006) at ACCEPTED — no status inversion remains.
 
+*Amendment sync (2026-07-16) — editable folder path + move on save:*
+
+- [x] `ProjectStore.moveProject(project, newDir)` shipped: relocates the whole project folder (project file + `<Name>_tasks/` incl. attachments and Archive) on a path change, updates the project's `path` frontmatter and resolved `projectDirectory`, and re-attaches the moved tasks (reuses the INT-015 rename/move machinery). Intermediate destination folders are auto-created; a target directory that is already occupied throws before any write (no partial move).
+- [x] Existing-project settings/configure modal (`src/modals/ProjectModal.ts`) gained an editable folder-path field that calls `moveProject` on save when the path changed.
+- [x] Folder paths containing spaces (and unicode) are handled literally — files land at the exact spaced path and remain discoverable.
+- [x] Amendment verification green from `main`: `intention-contract-r26-r27` PASS (see amendment re-lock testpass table); full suite 274 passed / 1 skipped.
+
 ## Amendment Log
 
 | Date | Type | Change | Author |
@@ -169,3 +188,5 @@ On a project whose frontmatter sets `path: Projects/Income/Q3-launch`, the store
 | 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-002/IB-002 >= ACCEPTED. Linked AEs AE-001/AE-005/AE-006 at ACCEPTED. TESTPASS to LOCKED via /write-intent --lock. | Claude (U12 land agent) |
 | 2026-07-16 | Substantive | Unlocked LOCKED to PROPOSED to admit the committed-scope amendment below (engineer-directed, user-directed 2026-07-16, full-auto authority): the create-project modal ships a folder-path field but the existing-project settings/configure modal has no way to re-point an already-created project's folder. Blast radius surfaced: WS-002 (ACCEPTED), IB-002 (ACCEPTED). | jeffhaskin1@gmail.com |
 | 2026-07-16 | Substantive | Amended scope (retroactive, engineer-directed completeness of INT-014 — NOT a new Intent): added the editable-folder-path / move-on-save capability to Desired Outcome, Components (existing-project settings modal), a 5th coverage row, Outcome Verification, and the Verification predicate (intention-contract-r26-r27). New store surface pinned: `ProjectStore.moveProject(project, newDir)` — moves the whole project folder (project file + `<Name>_tasks/` incl. attachments + Archive) on a path change, updates `path` frontmatter, handles spaces. Guarded red-first by `src/intention.test.ts` R26/R27 (authored this change). WS-002 + IB-002 amended in lockstep with the delta. Status set to IMPLEMENTING (delta already decomposed inline under delegated authority; the analyze/decompose caps re-checked and still PASS). The next (implement) + land workers re-lock via ADR-017 Path B once R26/R27 are green. | Claude (Worker V01, engineer-directed) |
+| 2026-07-16 | Substantive | Amendment implemented on `main` (commit `cf0f8fd`): `ProjectStore.moveProject` (target-occupied throws before any write; intermediate folders auto-created via `ensureFolder`; spaces/unicode honored literally; tasks re-attached via the shared `rebindRenamedProject` INT-015 machinery) + editable folder-path field on the existing-project settings modal. Amendment predicate re-evaluated from `main`: `pnpm check` exit 0; `pnpm test` 274 passed/1 skipped; `vitest src/intention.test.ts -t "R26"`/`-t "R27"` each 1 passed/26 skipped. Branch-diff/bead gates N/A — work shipped on main. IMPLEMENTING to LOCKED via ADR-017 Path B (WS-002/IB-002 >= ACCEPTED; linked AEs AE-001/AE-005/AE-006 at ACCEPTED — no status inversion). | Claude (land agent, engineer-directed) |
+| 2026-07-16 | Substantive | ADR-017 Path B re-lock: amendment R26/R27 green from main | 60890286+jeffhaskin@users.noreply.github.com |
