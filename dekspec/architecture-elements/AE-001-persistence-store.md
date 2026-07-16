@@ -23,10 +23,10 @@ Core
 ## Linked Artifacts
 
 - **Related ADRs:** none
-- **Related WSs:** none
+- **Related WSs:** WS-001, WS-002, WS-003
 - **Related ICs:** none
-- **Related IBs:** none
-- **Related Intents:** INT-001
+- **Related IBs:** IB-001, IB-002, IB-003
+- **Related Intents:** INT-001, INT-013, INT-014, INT-015
 - **Owners:** Jeff Haskin
 
 ## Implements
