@@ -68,6 +68,25 @@ The persistence store is the sole surface through which the rest of the plugin r
 
 *Guardrail satisfied: rendering and UI-triggering are explicitly deferred to the views/modals layers because they are presentation concerns, not persistence concerns — keeping this AE's boundary at "vault I/O and in-memory canonicalization" only.*
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Resolve effective per-project configuration (statuses, priorities, default view, auto-scheduling) by layering `Project.config` over global `PMSettings` through `ProjectConfig`, never by reading global settings directly.
+- Tolerate missing or malformed project/task files on every load path — never assume exclusive vault access, and self-heal orphaned or misparented tasks from each file's `parentId` rather than throwing.
+- Distinguish the store's own writes from external edits via self-write tracking, and serialize concurrent saves to a project through its per-project promise queue so overlapping mutations never race.
+
+**Ask first:**
+- Before changing the on-disk file layout (`Projects/<Name>.md`, `Projects/<Name>_tasks/<slug>.md`, `Archive/` folder deriving `Task.archived`) or the YAML/frontmatter representation — it is a data-migration surface that affects existing, version-controlled vaults.
+- Before altering the `TaskSource` contract itself, since it is the public interface every view, modal, command, and the TaskNotes integration slice programs against.
+- Before widening a frontmatter-only ("fm") write into a whole-file ("full") rewrite for a change that does not touch task body/structure — it enlarges diffs, which contradicts the stated collaboration/minimal-diff product goal.
+
+**Never do:**
+- Never render task/project data to the screen or decide which UI action triggers a mutation — presentation and UI-triggering belong to the views/modals layers, which reach the vault only through `TaskSource`.
+- Never fire saves unconditionally in parallel or bypass the 16-at-a-time batching and per-project queue — save correctness and bounded failure blast radius take priority over latency.
+- Never implement TaskNotes-format-specific parsing here beyond the `importNoteAsTask` / `importTaskForest` entry points — that format parsing lives in the TaskNotes integration slice.
+
 ## Relationships and Dependencies
 
 **Consumes:** Obsidian's `Vault`/`MetadataCache`/`FileManager` APIs (file read/write/rename/trash, frontmatter processing, cached frontmatter lookups); `PMSettings` (global statuses/priorities/config defaults) supplied by the plugin at construction.

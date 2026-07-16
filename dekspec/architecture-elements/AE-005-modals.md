@@ -69,6 +69,25 @@ It exists as a coherent unit because these files share one job and one contract:
 - The long-lived `ItemView` surfaces (`DashboardView`, `ProjectView`, and the Table/Gantt/Kanban subviews). Those are orchestrators that *open* modals via `ModalFactory`; they are not part of this slice.
 - The TaskNotes integration internals (`src/integrations/**`). `ImportModal` calls into them but the API adapters, capability probing, and forest-building live in their own slice.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Open every dialog through a `ModalFactory` helper (`openTaskModal`, `openProjectModal`, the pickers, `confirmDialog`/`promptText`) — never instantiate a `Modal`/`SuggestModal` subclass directly, so body pre-hydration, callback wiring, and the 6-argument constructor shape stay centralized.
+- Edit a deep clone of the entity and mutate the caller's object only when a store mutator runs on explicit save (or opt-in save-on-close), so cancel stays non-destructive; skip new/cancelled/already-saved/empty-title entities in the save-on-close path.
+- Resolve effective status/priority palettes via `store.configFor(project)`, keep UI text sentence case, use `YYYY-MM-DD` date strings, and re-declare the `--pm-*` tokens in `.pm-modal` since modals mount outside `.pm-root`.
+
+**Ask first:**
+- Before changing the `ModalFactory` façade surface — its helper signatures or option objects — since `PMViewRouter`, all views, and the `src/main.ts` command handlers open dialogs exclusively through it.
+- Before altering the save/commit contract — which store mutators are called (`insertTask`/`updateTask`/`moveTask`/`scheduleAfterChange`/`saveProject`/`importNoteAsTask`), the `onSave(entity)` callback shape, or the in-flight de-dup / double-submit / `TaskFileNameConflictError`-to-inline-error handling that callers rely on.
+- Before adding any in-code `style` assignment beyond the sanctioned dynamic runtime values (computed colors, avatar hashes, popover/`NoteLinkSuggest` offsets), since the no-inline-styles rule is CI-enforced and styling belongs in the scoped stylesheets.
+
+**Never do:**
+- Never implement persistence, scheduling, cloning-to-disk, conflict detection, or self-write tracking inside a modal — these dialogs call `plugin.store` (the `TaskSource`) for that logic; it belongs to the persistence-store AE.
+- Never define new UI primitives or composites here (`FormField`, `StatusBadge`, `PaletteListEditor`, etc.) or bypass the primitives → composites → orchestrators import direction — modals consume the UI-component AE's catalog, they don't own it.
+- Never reach into TaskNotes integration internals (`src/integrations/**`) or reintroduce a long-lived `ItemView` surface here — `ImportModal` delegates to `store.importNoteAsTask`/`store.importTaskForest`, and views live in their own slices.
+
 ## Relationships and Dependencies
 
 **Consumes:** `plugin.store` (the `TaskSource` implementation) for all reads/mutations; `plugin.settings` for global palettes, team members, and flags such as `saveTaskOnClose`; Obsidian primitives (`Modal`, `SuggestModal`, `ButtonComponent`, `ExtraButtonComponent`, `Menu`, `MarkdownRenderer`, `Notice`, `setIcon`, `setTooltip`, `prepareFuzzySearch`, `TFile`); domain types and factories from `src/types.ts` (`Task`, `Project`, `makeTask`, `makeProject`, `makeId`); pure tree/scheduling helpers (`flattenTasks`, `totalLoggedHours`, `wouldCreateCycle`, `rebuildTaskIndex`, `TaskFileNameConflictError`); utilities (`safeAsync`, `getDefaultStatusId`/`getDefaultPriorityId`, `getPriorityConfig`, `stringToColor`, `stringifyCustomValue`); the UI component system (`FormField`, `StatusBadge`, `PaletteListEditor`, `ui/composites/properties`, `addButton`, `Avatar`, `IconButton`, `ProgressBar`); the TaskNotes integrations (`integrations/tasknotes`, `integrations/tasknotesImport`); and `src/dates.ts` (`today`).

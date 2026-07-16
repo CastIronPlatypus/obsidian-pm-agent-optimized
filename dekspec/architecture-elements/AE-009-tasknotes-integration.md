@@ -64,6 +64,25 @@ The slice divides cleanly into two concerns: a runtime-access-and-palette module
 - Driving the import UX — selecting which TaskNotes files to import, resolving each file's references against the vault, and reporting results — which lives in `ImportModal` and `settings.ts`. This AE supplies the primitives those callers compose, not the workflow.
 - Writing back to TaskNotes or keeping the two plugins in sync. Interop here is a one-directional, on-demand import/adopt operation, not a live bridge, because Project Manager owns its own Markdown-file storage model.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Gate every entry into the foreign runtime behind the version/capability check — return the API only when `apiVersion === 1` and `hasCapability('catalog.read')` hold, and narrow the `unknown` plugin object defensively before touching any field.
+- Keep the mapping module (`tasknotesImport.ts`) pure and vault-agnostic — no `App`, no vault I/O, no persistence side effects — so translation stays deterministic and unit-testable in isolation.
+- Make palette upserts non-destructive: patch matching entries in place, insert unknown ones so TaskNotes' relative order carries over, and leave user-authored statuses/priorities that TaskNotes doesn't define untouched.
+
+**Ask first:**
+- Before raising the pinned `apiVersion === 1` gate to accept a new TaskNotes API version or version range — it is the negotiated contract with an independently-developed foreign plugin and changing it widens the trusted surface.
+- Before changing the `TaskNotesApi`/`TaskNotesTaskInfo`/`TaskNotesStatus`/`TaskNotesPriority` record contracts or how foreign fields map into `Task`/`StatusConfig`/`PriorityConfig` — these shapes are consumed by `settings.ts` and `ImportModal` and shifting them ripples beyond this slice.
+- Before making interop anything other than one-directional on-demand import (e.g. writing back to TaskNotes or live sync) — that reverses this slice's stated non-goal and touches Project Manager's ownership of its own storage model.
+
+**Never do:**
+- Never persist to disk or perform vault writes from this slice — it produces in-memory objects and mutates the passed-in settings; writing task files belongs to `ProjectStore.importForest`.
+- Never let TaskNotes-specific knowledge leak outside `src/integrations/**` — the rest of the plugin must not reference TaskNotes directly, and every entry point must degrade to a safe `null`/no-op when TaskNotes is absent or too old.
+- Never construct a task forest that dangles or cycles — reject a parent adoption whose ancestry already includes the task (keep it a root) and silently drop parent/dependency references to notes outside the import selection.
+
 ## Relationships and Dependencies
 
 **Consumes:** the host Obsidian `App` (`app.plugins.getPlugin`, `app.vault.getFileByPath`, `app.metadataCache.getFirstLinkpathDest`); the TaskNotes plugin's runtime API v1 (`getStatuses`, `getPriorities`, `getTask`, `getSettingsSnapshot`, `hasCapability`); `PMSettings` and its `statuses`/`priorities` palettes.

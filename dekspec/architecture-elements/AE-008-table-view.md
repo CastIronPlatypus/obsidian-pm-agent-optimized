@@ -66,6 +66,25 @@ The slice is deliberately a thin, stateful presentation layer over the store. It
 - Orchestration around the table: `ProjectView`'s toolbar, header, saved-views, filter editing, and the choice of which `SubView` is active. Table View receives its `FilterState`, `Project`, and `onRefresh` callback from that orchestrator and does not own them.
 - The Gantt and Kanban presentations of the same tasks — sibling `SubView`s, deliberately separate so each presentation's layout logic stays isolated.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Route every persistent edit — inline cell edits and bulk actions alike — through `plugin.store` mutators (`updateTask(s)`, `moveTasks`, `archiveTask`, `deleteTask(s)`, `scheduleAfterChange`) and then await `onRefresh`; never mutate in-memory task objects directly, keeping the store the single source of truth.
+- Derive keyboard navigation, checkbox range, and select-all logic from `getVisibleTaskIds(state)` over `visibleRows`, so selection and virtual-window bookkeeping stay consistent with exactly what is displayed.
+- Resolve status/priority ordering and palettes through the effective `ResolvedProjectConfig` from `plugin.store.configFor(project)` in `compareTask`, never reading global settings statuses directly.
+
+**Ask first:**
+- Before changing the virtual-window or row-height calibration logic (window-bounds repaint skip, calibrate-once) — these are guarded against feedback loops, and a regression here makes scrolling/re-rendering oscillate.
+- Before altering the filter/flatten/orphan-promotion semantics (matching rows shown regardless of collapsed ancestors, orphans promoted to root) — this deliberately overrides collapse state and other `SubView`s share the underlying data.
+- Before changing the `getViewState()` `{ sortKey, sortDir }` shape or the `SubView` interface surface (`render`/`refresh`/`handleKeyDown`/`getViewState`), since `ProjectView` persists/restores and drives against that contract.
+
+**Never do:**
+- Never touch the vault, frontmatter, dirty tracking, or scheduling logic directly — persistence is the store's concern, reached here only through the `TaskSource` contract.
+- Never define reusable cell/primitive components or modal classes here; consume `ui/composites/*`, `ui/primitives`, `ModalFactory`, and `TaskPickerModal` rather than redefining them, and never instantiate a `Modal` subclass directly.
+- Never assign `element.style.*`; table styling lives in `src/styles/table.css`, with only measured dimensions set via classes/`setCssStyles`.
+
 ## Relationships and Dependencies
 
 **Consumes:** `Project` (its `tasks`, `customFields`, `teamMembers`), the incoming `FilterState`, and the effective `ResolvedProjectConfig` (statuses/priorities) obtained via `plugin.store.configFor(project)`; pure store helpers `flattenTasks`/`totalLoggedHours`/`collectAllAssignees`/`collectAllTags` (`TaskTreeOps`, store barrel), `findTaskById` (`TaskIndex`), `applyTaskFilterFlat`/`isFilterActive` (`TaskFilter`); date helpers from `src/dates.ts`; UI components from `ui/composites/*` and `ui/primitives`; modal openers from `ModalFactory` and `TaskPickerModal`.

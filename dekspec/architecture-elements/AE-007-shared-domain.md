@@ -66,6 +66,25 @@ The scope is deliberately definitional and functional, not behavioral: it declar
 - Rendering, view orchestration, and modal behavior — these consume the types and helpers but define no UI here. Kept out so the domain vocabulary stays framework- and view-agnostic.
 - Config *override resolution* logic (merging `ProjectConfig` onto global `PMSettings` into `ResolvedProjectConfig`) — the shapes are declared here, but the merge is the store's `ProjectConfig` module's job.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Route all date math through the `dates.ts` `Temporal.PlainDate` helpers (`today`/`parsePlainDate`/`formatDate`/`relativeDue`); dates stay `YYYY-MM-DD` strings at rest and in the type surface, never raw `Date` arithmetic (the legacy `formatDateShort`/`formatDateLong` locale formatters are the only sanctioned `Date` exception).
+- Keep `parsePlainDate` and everything built on it tolerant of empty/invalid input — return `null`/`''` rather than throwing, since `YYYY-MM-DD` fields are frequently unset.
+- Keep every helper and constructor here pure, stateless, and low-dependency (the only sanctioned side effects are `safeAsync`'s `Notice`, `isIconName`'s `setIcon` probe, and `svgEl`'s `activeDocument` DOM creation); constructors like `makeTask`/`makeProject` must seed valid, fully-populated instances.
+
+**Ask first:**
+- Before changing any core domain type, `DEFAULT_*` palette/settings shape, or config interface (`StatusConfig`, `ProjectConfig`, `PMSettings`, `ResolvedProjectConfig`) — this slice is the most widely-imported code in the repo, so shape changes ripple into the store, views, modals, and commands at once.
+- Before altering `relativeDue`'s branch boundaries (overdue/today/tomorrow/within-week/beyond-week) — its behavior is pinned in `dates.test.ts` against a fixed injectable `from`, and that test must be updated in the same change.
+- Before adding any new runtime import or dependency to this slice — it is the acyclic leaf of the import graph, so a new dependency can introduce a cycle that breaks every consumer.
+
+**Never do:**
+- Never import from the store, views, or UI slices — this slice must stay a dependency-free leaf so everything else can import it without cycles; a type-only `TaskIndex` reference is the sole permitted store touchpoint, never a runtime one.
+- Never perform persistence, dirty-tracking, file I/O, config override resolution (merging `ProjectConfig`→`ResolvedProjectConfig`), or rendering here — those belong to the store (`src/store/**`) and the view/modal layers; this slice only *defines* the shapes they consume.
+- Never redefine `Task.archived` or `Task.collapsed` as persisted frontmatter — they are runtime/UI state, and the type definitions must keep that intent legible so consumers don't write them into task files.
+
 ## Relationships and Dependencies
 
 **Consumes:** `temporal-polyfill` (via `dates.ts`) for timezone-safe `PlainDate` arithmetic; Obsidian's `Notice` and `setIcon` and the ambient `activeDocument` (via `utils.ts`) for user-facing errors, icon probing, and DOM/SVG element creation.

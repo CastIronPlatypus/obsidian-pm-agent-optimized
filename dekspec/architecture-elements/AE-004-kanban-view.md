@@ -67,6 +67,25 @@ The slice pairs the orchestrating class (`KanbanView.ts`) with its dedicated sty
 - Task-tree mutation logic beyond a single status change (moving, reparenting, ordering) — not exposed by this view; drag only restatuses.
 - Config/override resolution — computed by the store's `configFor`; the view never reads global settings for statuses/priorities.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Resolve effective status/priority config once per `render()` through `store.configFor(project)` and build one `KanbanColumn` per configured status — never read `plugin.settings.statuses`/`priorities` directly, so per-project overrides are honored.
+- Keep drop handling idempotent-safe: no-op when the drop-target status equals the task's current status or when the tracked drag task does not match the dropped id, and delegate the actual status write to `store.updateTask` rather than mutating the task in place.
+- Treat task bodies as possibly-unhydrated: drive description previews through lazy `store.loadTaskBody` and re-render at most once (only when a body actually filled in) to avoid render loops.
+
+**Ask first:**
+- Before widening drag-and-drop beyond a single status change into reordering-within-column or reparenting (the P3 open question) — that reaches into sibling-order/parentage semantics owned by the store and changes this view's interaction contract.
+- Before changing the shape of `KanbanCardData` or the callbacks handed to `KanbanColumn`, since that is the public seam between this board and the card composite that lets card internals evolve independently.
+- Before altering the `pm-kanban-*` CSS class contract or Obsidian theme-variable usage in `kanban.css`, as the column/card box model is a shared surface relied on by the composite.
+
+**Never do:**
+- Never assemble card DOM or column header/drop-zone chrome inline — that belongs to the `KanbanColumn` composite; this slice only supplies `KanbanCardData` and callbacks, respecting the primitives → composites → orchestrators import direction.
+- Never read or write vault files, do dirty-tracking, or resolve config overrides in the view — persistence and `configFor` belong entirely to `plugin.store`; and never own filtering, saved views, toolbar, or disk reloads, which belong to the hosting `ProjectView` (only consume the handed `FilterState` and call the provided `onRefresh`).
+- Never assign inline styles or let raw markdown leak into card chrome — all presentation lives in `kanban.css`, and description previews must be sanitized plain text (code fences, inline code, links/images, list/heading and emphasis markers stripped, clamped to 240 chars).
+
 ## Relationships and Dependencies
 
 **Consumes:** the `Project` (its `tasks`), a `FilterState`, and a `PMPlugin` handle (for `store` and `settings`) via constructor; the `ResolvedProjectConfig` from `store.configFor`; `KanbanColumn` / `KanbanCardData` from the UI composites layer; tree/aggregate helpers `flattenTasks` and `totalLoggedHours` (`TaskTreeOps`); `matchesFilter` (`TaskFilter`); utilities `isTaskOverdue`, `isTerminalStatus`, `getPriorityConfig`; `openTaskModal` (`ModalFactory`); `buildTaskContextMenu` (`TaskContextMenu`); Obsidian's `Menu`; and the CSS class contract defined in `kanban.css`.

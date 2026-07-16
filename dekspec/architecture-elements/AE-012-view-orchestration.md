@@ -70,6 +70,25 @@ This slice is the top-level view orchestration layer of the Project Manager plug
 - Modal construction and the concrete task/project editing UI — reached only through `ModalFactory` (`openTaskModal`, `openProjectModal`); this AE triggers modals but does not own them.
 - UI primitives/composites (`ProjectHeader`, `ProjectCard`, `ViewSwitcher`, `EmptyState`) beyond wiring their callbacks.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Load projects through `plugin.store.loadProject` and resolve effective config via `store.configFor`, then render a "Project not found" empty state when the file is missing — never read vault files or frontmatter directly from this layer.
+- Keep one-time DOM/listener setup idempotent behind `ensureInitialized()`, since either `onOpen` or `setState` may fire first for deferred leaves, and treat `setState` as the sole project loader (`onOpen` is setup-only).
+- Host exactly one `SubView` at a time and, on a full `renderCurrentView()`, explicitly save and restore per-mode scroll/view state (Gantt scroll/label width, Table sort/scroll); prefer the subview's in-place `refresh()` over destroy-and-rebuild.
+
+**Ask first:**
+- Before changing the `SubView` contract (`render`/`refresh`/`destroy`/`handleKeyDown`), since it is the hosting protocol every render mode implements — a change ripples into the Table/Gantt/Kanban subsystems this AE deliberately does not own.
+- Before altering the vault file-change reload policy or the coordination constants (the 300ms reload debounce, the 5s self-write window) — these are duplicated across `ProjectView` and `DashboardView` and govern the reload-vs-in-place-refresh decision.
+- Before changing where filter/saved-view state persists (`settings.projectFilters` vs. the project file via `store.saveProject`), since it crosses into the settings/store data surface.
+
+**Never do:**
+- Never write vault files, frontmatter, or perform dirty-tracking/self-write bookkeeping here — that belongs to the store; this slice only consumes `TaskSource` and calls `consumeSelfWrite` to skip its own writes.
+- Never construct modals or task/project editing UI directly; reach them only through `ModalFactory` (`openTaskModal`, `openProjectModal`).
+- Never use inline styles (`element.style`); express layout and mode state through CSS classes (`pm-view`, `pm-root`, `pm-toolbar`, `pm-content`, `pm-content--kanban`), and never let an unguarded async dashboard render overwrite a newer one (honor the render token).
+
 ## Relationships and Dependencies
 
 **Consumes:** `plugin.store` (`TaskSource`) for `loadProject`, `loadAllProjects`, `saveProject`, `deleteProject`, `configFor`, and `consumeSelfWrite`; `plugin.settings` (`defaultView`, `projectsFolder`, `projectFilters`, collapsed state via `applyCollapsedState`); Obsidian's `Workspace`/`WorkspaceLeaf`, `Vault` events, and `TFile`; core types (`Project`, `Task`, `ViewMode`, `FilterState`, `SavedView`, `StatusConfig`) and helpers (`truncateTitle`, `safeAsync`, `makeId`, `makeDefaultFilter`, `isTerminalStatus`).

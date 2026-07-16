@@ -79,6 +79,29 @@ The slice is deliberately non-standard: bundling goes through `tsdown` (not esbu
 - The actual lint *rules'* correctness and the styleguide catalog — the tooling wires up `eslint-plugin-obsidianmd` and reads `docs/styleguide.md`, but the substance of UI/style conventions belongs to the UI-component AE, not here, because those rules constrain product code rather than the build pipeline.
 - Individual test *cases* and their assertions — this AE owns the harness and doubles that make tests runnable and hermetic; what each `*.test.ts` asserts about store behavior is owned by the AE for the code under test, so that changing a store invariant does not read as a tooling change.
 
+## Views
+
+*No architectural view is authored for this AE: it is a Platform Concern describing the build, lint, and release toolchain — config files and CI workflow definitions, not a runtime deployment topology — so a Context, Container, or Deployment diagram would add no clarifying structure beyond the Implements globs and the Responsibilities list (which tool runs on which input, gated by which CI job).*
+
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Add any new quality gate to the `package.json` script surface (`check`/`check:submission`/`build`/`test`), not only to a workflow, so a developer's terminal and CI compute "green" identically.
+- Keep the `VAULT_PATH`/`outDir` resolution logic byte-for-byte identical between `tsdown.config.ts` and `build-styles.mjs`, so a `VAULT_PATH` build lands `main.js` and `styles.css` in the same plugin folder.
+- Keep the test harness hermetic — route `obsidian` to `test/obsidian-stub.ts` and use `FakeVault`, preserving the deliberately-missing `metadataCache` that forces the store's read+parse fallback under test.
+
+**Ask first:**
+- Before changing the release version-lockstep checks in `release.yml` (tag must equal `manifest.json` `version` and exist in `versions.json`, and refuse if the release exists) — it gates what ships to the Obsidian community-plugin channel.
+- Before altering the `deps.neverBundle` set (Obsidian, Electron, CodeMirror/Lezer, Node builtins) — these are runtime externals and bundling any of them breaks the plugin, a blast radius beyond this slice.
+- Before relaxing the submission gate's zero-tolerance (`eslint --max-warnings 0`) or adding/widening a rule exemption like the `no-static-styles-assignment` carve-out for `src/views/table/**`, since it changes what product code is allowed to merge.
+
+**Never do:**
+- Never hand-edit or treat `main.js`/`styles.css` as source — they are build outputs of this pipeline.
+- Never encode UI/style convention substance or store-behavior assertions here — lint-rule correctness and the styleguide belong to the UI-component AE, and individual `*.test.ts` cases belong to the AE for the code under test; this slice owns only the wiring and harness.
+- Never unpin a third-party GitHub Action from its commit SHA or drop `--frozen-lockfile` installs, which would break CI supply-chain hygiene.
+
 ## Relationships and Dependencies
 
 **Consumes:** TypeScript source `src/main.ts` and its imports; CSS source `src/styles/index.css`; `tsconfig.json` and `@2bad/tsconfig`; environment variables `PRODUCTION`, `VAULT_PATH`, `STYLEGUIDE`; `manifest.json` and `versions.json` (read during release verification); `pnpm-lock.yaml` (frozen-lockfile installs).

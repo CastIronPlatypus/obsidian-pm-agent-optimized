@@ -67,6 +67,25 @@ The slice deliberately splits pure geometry (`TimelineConfig`), stateless drawin
 - Ownership of filter state, saved views, and the toolbar/header chrome — those belong to the hosting `ProjectView` orchestrator, which passes `FilterState` and an `onRefresh` callback in.
 - The Table and Kanban presentations of the same task tree — sibling subviews, intentionally separate.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Route every task mutation (start/due, dependencies, row order, collapse) through `plugin.store` (`updateTask`/`reorderTask`/`persistCollapsedState`), push the undo/redo entry, and request `store.scheduleAfterChange` — the view is a presentation-and-input surface, never a source of truth.
+- Register every document-level listener and per-bar handler in `cleanupFns` and run cleanup before each re-render, so listeners never leak across re-renders or leaves.
+- Keep coordinate math pure in `TimelineConfig` and drawing functions stateless given a `RendererContext`; do all date arithmetic through `Temporal.PlainDate` via `dates.ts`, never raw `Date` math.
+
+**Ask first:**
+- Before changing the `RendererContext` shape or the `TimelineConfig` geometry/snap contract (`dateToX`/`xToDate`/`getSnapPoints`/`snapX`) — the same context threads through every renderer and interaction handler in the slice.
+- Before altering how the slice reads shared inputs — resolving effective `StatusConfig[]` other than via `store.configFor(project)`, or reading settings other than `ganttGranularity`/`ganttWeekLabel` — since config resolution is shared across all views.
+- Before gating undo/redo or Gantt keyboard shortcuts on anything other than the Gantt leaf being the active workspace leaf, which would risk hijacking undo/redo during unrelated note edits.
+
+**Never do:**
+- Never write to the vault, do dirty tracking, self-write bookkeeping, or run the dependency scheduling/cycle-detection algorithm here — those belong to the persistence-store AE and `Scheduler`; the view only requests them.
+- Never own filter state, saved views, or the toolbar/header chrome, or reach into the Table/Kanban presentations — those belong to the hosting `ProjectView` and sibling subviews.
+- Never assign inline styles beyond the few runtime-computed pixel dimensions (label-panel resize handle, sticky-header sizing, scrollbar spacer); all other visual styling lives in `src/styles/gantt.css`.
+
 ## Relationships and Dependencies
 
 **Consumes:** `Project.tasks` (the in-memory tree), the effective `StatusConfig[]` resolved once per render via `store.configFor(project)`, the incoming `FilterState`, and plugin settings (`ganttGranularity`, `ganttWeekLabel`). All date values are `YYYY-MM-DD` strings parsed into `Temporal.PlainDate` via `dates.ts`.

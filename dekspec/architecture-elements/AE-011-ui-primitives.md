@@ -81,6 +81,25 @@ The slice exists as a coherent unit so that no view or modal hand-rolls a badge,
 
 *Guardrail satisfied: the composites layer and the orchestrator views are explicitly deferred because they carry task/project domain semantics; this AE's boundary stays at "domain-free reusable primitives plus the design-system CSS and its catalog," so the import direction (primitives → composites → views) is preserved.*
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Keep `src/ui/primitives/**` domain-free — no imports from `store/` or `main`, so the primitives → composites → orchestrators direction holds and the layer stays reusable without dragging in persistence.
+- Follow the chained-setter contract for every primitive (constructor takes `parentEl`, exposes the root as `.el`, setters return `this`), and extend an existing primitive with a new setter/variant rather than hand-rolling a one-off element.
+- Put static styling in `pm-*` CSS classes and write only dynamic per-instance values to elements — as CSS custom properties (`--pop-top`/`--pop-left`, `--pm-chip-color`, `--pm-progress-color`) wherever practical — so the class stylesheet stays the source of truth.
+
+**Ask first:**
+- Before adding a new primitive or a new plugin theme token — a primitive requires updating `docs/styleguide.md` and `StyleguideView` in the same change, and today only `--pm-ghost-border`/`--pm-shadow-ambient` are plugin-defined (everything else defers to Obsidian's theme).
+- Before changing `Popover`'s modal-mount / `fixed`-position / bottom-sheet-fallback behavior or its listener teardown, since it must stay usable inside a focus-trapping modal and on phones and must always tear down its document/window listeners on close.
+- Before altering the CSS bundle entry (`index.css`) or its import list, since it also pulls in view/modal stylesheets (`table.css`, `gantt.css`, `kanban.css`, `task-modal.css`, …) owned by other slices.
+
+**Never do:**
+- Never build task/project-specific composites here (`TaskRow`, `KanbanCard`, `ProjectCard`, cells, `dueChip`/`tagChip`/`timeChip`) — those carry domain semantics and belong to the composites slice, even though `StyleguideView` imports them for display.
+- Never implement persistence in this slice — `TaskContextMenu` and `PaletteListEditor` only dispatch store mutators and render the control; the actual reads/writes live in the store AE (`src/store/**`).
+- Never give the live gallery (`StyleguideView`, gated behind `__STYLEGUIDE__`) store or vault access — it must render from mock data only so it is safe in any vault; and never hardcode light/dark palettes instead of deferring to Obsidian's theme variables.
+
 ## Relationships and Dependencies
 
 **Consumes:** Obsidian's UI toolkit — `ButtonComponent`, `ExtraButtonComponent`, `Menu`, `Notice`, `setIcon`, `setTooltip`, `parseLinktext`, `Platform`, `AbstractInputSuggest`, `getIconIds`, and the ambient `activeWindow`/`activeDocument`/`createDiv` helpers; `src/utils.ts` (`stringToColor`, `getStatusConfig`, `getPriorityConfig`, `formatBadgeText`, `isIconName`, `safeAsync`); type shapes from `src/types.ts` (`Task`, `Project`, `StatusConfig`, `PriorityConfig`, status/priority ids); `ModalFactory` (for the task context menu's Edit/Add/Duplicate flows); and, at CSS level, Obsidian's theme variables (`--text-*`, `--background-*`, `--interactive-accent`, `--radius-*`, `--font-*`, `--size-*`).

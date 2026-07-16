@@ -63,6 +63,25 @@ The slice exists as a coherent unit because these fragments are the shared build
 - View orchestration and data loading. Deciding which project to load, opening leaves, resolving effective project config, hosting a single subview at a time, and disk-reload wiring are the responsibility of `ProjectView`/`PMViewRouter`; composites are handed finished prop bags.
 - Modal lifecycle. Composites open popovers and inline inputs but never instantiate `Modal` subclasses; all modals route through `ModalFactory`.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Emit all persistence and task-mutation intent outward through injected callbacks (`onDrop`, `onSavedViewSave`, `onChange`, `onSave`); read props and pure selectors, but let the host view perform the store operation.
+- Keep imports strictly downward — from primitives, `src/types.ts`, `src/dates.ts`, utils, and pure store selectors only — and expose the constructed subtree as `.el`, never reaching back into `main` or view orchestrators.
+- Route dates through `src/dates.ts` (`YYYY-MM-DD` strings, no raw `Date` arithmetic), keep UI text sentence case, and preserve the commit latches — inline-edit's committed/saved guard and `renderDateControl`'s defer-to-close — so partial values and double-commits stay blocked.
+
+**Ask first:**
+- Before changing a composite's prop-bag shape or callback signature (e.g. `onDrop(taskId, newStatus)`, `FilterState` in/out contract) — these are the public surface the four view orchestrators (`TableView`, `KanbanView`, `GanttView`, `DashboardView`, `ProjectView`) depend on.
+- Before adding a `setCssStyles`/CSS-custom-property assignment — inline styling is only sanctioned for dynamic, data-derived color/depth values that cannot be a static class; anything else needs a class in `src/styles/**`.
+- Before extracting shared card-assembly logic (marker chips, three-tag truncation, progress/subtask rows) across `KanbanCard` and table-side rendering — this is the open P3 question and touches multiple composites at once.
+
+**Never do:**
+- Never call `plugin.store` mutators or write the vault, and never carry self-write/dirty-tracking concerns — that persistence responsibility belongs to the store AE.
+- Never define new leaf visual primitives here (`Chip`, `ProgressBar`, `AvatarStack`, etc. live in `src/ui/primitives/**` with the styleguide); consume them, and emit no one-off elements the styleguide decision tree forbids.
+- Never instantiate a `Modal` subclass or take on view orchestration (project loading, leaf opening, effective-config resolution, disk-reload wiring) — modals route through `ModalFactory` and orchestration belongs to `ProjectView`/`PMViewRouter`.
+
 ## Relationships and Dependencies
 
 **Consumes:** UI primitives (`Chip`, `ProgressBar`, `AvatarStack`, `ChipButton`, `IconButton`, `ButtonComponent`, `Popover`, `renderFilterDropdown`); domain types from `src/types.ts` (`Task`, `Project`, `FilterState`, `SavedView`, `StatusConfig`, `PriorityConfig`, `DueDateFilter`); pure store selectors from the `src/store` barrel and `TaskFilter` (`collectAllAssignees`, `collectAllTags`, `isFilterActive`, `countActiveFilters`); utilities (`formatDateShort`, `stringToColor`, `safeAsync`, `formatBadgeText`, `isIconName`); date helpers from `src/dates.ts` (`formatDate`, `relativeDue`, `today`); and Obsidian APIs (`setIcon`, `Menu`, `ButtonComponent`).
@@ -79,7 +98,7 @@ The slice exists as a coherent unit because these fragments are the shared build
 - Composites must remain side-effect-free with respect to persistence: they may read props and call pure selectors, but all mutation flows outward through callbacks so the layer stays unit-testable and independent of any particular `TaskSource` backend.
 - Import direction is strictly downward — composites import from primitives, types, dates, utils, and pure store selectors, never from `main` or view orchestrators — preserving the three-layer discipline.
 - UI text is sentence case and dates are `YYYY-MM-DD` strings routed through `src/dates.ts`; date math must not use raw `Date` arithmetic.
-- Interaction affordances guard against double-commit and focus theft: inline edit and inline save use a committed/saved latch, and `renderDateControl` deliberately defers commit to popover close to avoid a native date input's premature `change` firing mid-edit.
+- Interaction affordances guard against double-commit and focus theft: inline edit and inline save use a committed/saved latch, and `renderDateControl` defers commit to popover close so a native date input's premature `change` event mid-edit does not commit a partial value.
 - New or changed composites should extend an existing primitive per the styleguide decision tree rather than emitting one-off elements.
 
 ## Open Questions / Planned Follow-ons

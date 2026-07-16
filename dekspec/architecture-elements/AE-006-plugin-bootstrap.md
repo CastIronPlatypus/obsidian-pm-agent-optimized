@@ -68,6 +68,25 @@ The scope is deliberately thin. This AE covers *bootstrapping and cross-cutting 
 - **Modal construction** — every modal is opened through `ModalFactory` helpers; this slice never instantiates a `Modal` subclass, per the project convention, so modal internals are out of scope.
 - **Scheduling and date math** — auto-schedule is only a persisted toggle here; the dependency scheduler and the `Temporal`-based date helpers are owned elsewhere. The notifier only *reads* dates through `src/dates.ts`.
 
+## Three-tier Boundaries
+
+<!-- canonical: parsed into the IR `boundaries` field (always_do / ask_first / never_do) -->
+
+**Always do:**
+- Merge saved `data.json` over `DEFAULT_SETTINGS` in `loadSettings`, backfilling empty palettes and the `projectFilters`/`collapsedTasks` maps, and only re-save when a migration actually changed something (the `migrated` guard).
+- Keep new settings migrations additive and idempotent against already-migrated data, since migrations here are one-way and in-place — the legacy shape is gone once translated.
+- Wrap the notifier's project load in try/catch that returns so a failed `loadAllProjects` never crashes the hourly interval, and honor the per-session dedupe set plus terminal-status resolution through `store.configFor`.
+
+**Ask first:**
+- Before changing what runs on `workspace.onLayoutReady` (the one-shot `migrateProjects` rewrite or `cleanupStaleProjectFilters`) — these touch existing vault files and settings maps and must stay no-op-safe on every startup.
+- Before altering the `PMSettings` / `DEFAULT_SETTINGS` shape or the `data.json` persistence format, since every view, modal, and command reads it through `plugin.settings` and it is the migration surface for existing vaults.
+- Before adding or removing a registered view type, command, ribbon entry, or editor-menu item — these are the plugin's public entry-point surface consumed by Obsidian and users.
+
+**Never do:**
+- Never implement persistence, dirty tracking, YAML parsing, or scheduling here — program only against the `TaskSource` interface (`loadAllProjects`, `loadProject`, `saveProject`, `updateTasks`, `configFor`); storage and the dependency scheduler belong to other slices.
+- Never write collapsed or undo/redo state into task files — collapsed state lives in `data.json` keyed by project path and toggling it must not rewrite task frontmatter; the undo stack is in-memory only.
+- Never instantiate a `Modal` subclass, render views directly, use inline styles in the settings tab, or write non-sentence-case UI text — modals go through `ModalFactory` and view rendering belongs to the views layer.
+
 ## Relationships and Dependencies
 
 **Consumes:** the Obsidian API (`Plugin`, `PluginSettingTab`, `Setting`, `Notice`, `MarkdownView`, `workspace`, `metadataCache`, `vault`, `loadData`/`saveData`, `registerView`/`registerEvent`/`registerInterval`); the `TaskSource` store interface via `plugin.store`; `ModalFactory` (`openProjectModal`, `openTaskModal`, `openProjectPicker`, `openTaskPicker`, `openImportModal`); `PMViewRouter`; pure tree helpers (`flattenTasks`, `findTask`); `types` (`DEFAULT_SETTINGS`, `PMSettings`, `Project`, `Task`, `makeId`, palette configs); the TaskNotes integration (`isTaskNotesInstalled`, `getTaskNotesApi`, `importTaskNotesPalettes`); palette list editors and `IconButton` primitives; `utils` (`safeAsync`, `isTerminalStatus`); and `dates` (`Temporal`, `today`, `parsePlainDate`).
