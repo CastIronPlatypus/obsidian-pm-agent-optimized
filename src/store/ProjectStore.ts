@@ -88,6 +88,12 @@ function fileNameFromPath(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '')
 }
 
+/** The vault-relative parent folder of a path (`''` for a vault-root file). */
+function parentDirOf(path: string): string {
+  const idx = path.lastIndexOf('/')
+  return idx > 0 ? path.slice(0, idx) : ''
+}
+
 /**
  * Handles all read/write operations against the Obsidian vault.
  *
@@ -214,12 +220,24 @@ export class ProjectStore implements TaskSource {
    * a view's reload after an external edit misses the stale cache entry.
    */
   registerCacheInvalidation(plugin: Plugin): void {
-    const onChange = (file: TAbstractFile): void => this.invalidateForPath(file.path)
+    // create/modify: route qualifying external pm-task files to ingestion first
+    // (it captures the owning project synchronously, before invalidation could
+    // drop it), then invalidate the cache for external project-file edits.
+    const onChange = (file: TAbstractFile): void => {
+      if (file instanceof TFile) void this.handleExternalTaskChange(file)
+      this.invalidateForPath(file.path)
+    }
     plugin.registerEvent(this.app.vault.on('create', onChange))
     plugin.registerEvent(this.app.vault.on('modify', onChange))
-    plugin.registerEvent(this.app.vault.on('delete', onChange))
+    plugin.registerEvent(this.app.vault.on('delete', (file) => this.invalidateForPath(file.path)))
     plugin.registerEvent(
       this.app.vault.on('rename', (file, oldPath) => {
+        // A rename of a loaded project file rebinds it in place (name + tasks
+        // folder) instead of dropping it; handleExternalRename re-keys the cache.
+        if (file instanceof TFile && this.projectCache.has(oldPath)) {
+          void this.handleExternalRename(oldPath, file)
+          return
+        }
         this.invalidateForPath(file.path)
         this.invalidateForPath(oldPath)
       })
@@ -797,6 +815,177 @@ export class ProjectStore implements TaskSource {
     } catch (e) {
       console.error(`[PM] Failed to ingest external task ${file.path}:`, e)
       return null
+    }
+  }
+
+  /**
+   * Route a vault create/modify of a possibly-external `pm-task` file to
+   * ingestion. Finds the loaded project whose `<Name>_tasks/` folder holds the
+   * file and hands off to `ingestExternalTask`; a file the store itself just
+   * wrote (a self-write) is skipped so backfills don't echo. Non-task files and
+   * files outside every loaded project's folder are ignored (returns null).
+   *
+   * This is the store-level seam the plugin's vault listeners call, so the
+   * view/composition-root glue stays thin and testable.
+   */
+  async handleExternalTaskChange(file: TFile): Promise<Task | null> {
+    // Non-destructive peek: the view's modify listener still needs the marker to
+    // skip its own reload, so we must not consume it here.
+    if (this.peekSelfWrite(normalizePath(file.path))) return null
+    const path = normalizePath(file.path)
+    for (const project of this.projectCache.values()) {
+      const taskFolder = normalizePath(this.projectTaskFolder(project))
+      if (path.startsWith(taskFolder + '/')) return this.ingestExternalTask(project, file)
+    }
+    return null
+  }
+
+  /**
+   * Rename a loaded project through the plugin: rename its `Projects/<Name>.md`
+   * file and its `<Name>_tasks` folder on disk (via the vault API), keep the
+   * in-memory project + its tasks re-bound to the new paths, and persist the new
+   * title (R13). Every path touched is `markSelfWrite`-marked inside one
+   * suppression window so the vault rename events these writes raise are consumed
+   * rather than echoed back into a second rename (R14).
+   */
+  async renameProject(project: Project, newTitle: string): Promise<void> {
+    const oldPath = normalizePath(project.filePath)
+    const parentDir = parentDirOf(oldPath)
+    const safeName = newTitle.replace(/[\\/:*?"<>|]/g, '-')
+    const newPath = normalizePath(parentDir ? `${parentDir}/${safeName}.md` : `${safeName}.md`)
+    if (newPath === oldPath) {
+      // Same on-disk name (title differs only cosmetically); just persist the title.
+      project.title = newTitle
+      await this.saveProject(project)
+      return
+    }
+    if (this.app.vault.getAbstractFileByPath(newPath)) {
+      throw new Error(`A note named "${safeName}" already exists.`)
+    }
+
+    const oldTaskFolder = normalizePath(oldPath.replace(/\.md$/, '_tasks'))
+    const newTaskFolder = normalizePath(newPath.replace(/\.md$/, '_tasks'))
+    // Self-mark every path we're about to touch, before any write, so the whole
+    // rename lands inside one suppression window (R14 — no echo loop).
+    this.markSelfWrite(oldPath)
+    this.markSelfWrite(newPath)
+    this.markSelfWrite(oldTaskFolder)
+    this.markSelfWrite(newTaskFolder)
+
+    const file = this.app.vault.getAbstractFileByPath(oldPath)
+    if (file instanceof TFile) await this.app.fileManager.renameFile(file, newPath)
+    await this.rebindRenamedProject(project, oldPath, newPath, oldTaskFolder, newTaskFolder, newTitle)
+  }
+
+  /**
+   * Map an inbound vault `rename` event (old path → the renamed file) onto a
+   * loaded item and update its name in memory + persisted title (R12). A
+   * project-file rename cascades the `<Name>_tasks` folder rename and re-points
+   * every task's `filePath`, so tasks stay attached (R15); a task-file rename
+   * updates just that task. An event whose new path the store self-marked is the
+   * echo of a plugin-initiated rename and is ignored; so is a rename whose old
+   * path resolves to no loaded item.
+   */
+  async handleExternalRename(oldPath: string, file: TFile): Promise<void> {
+    const normalizedOld = normalizePath(oldPath)
+    const newPath = normalizePath(file.path)
+    if (normalizedOld === newPath) return
+    // A self-marked new path means our own renameProject raised this event.
+    if (this.peekSelfWrite(newPath)) return
+
+    const cachedProject = this.projectCache.get(normalizedOld)
+    if (cachedProject) {
+      const oldTaskFolder = normalizePath(normalizedOld.replace(/\.md$/, '_tasks'))
+      const newTaskFolder = normalizePath(newPath.replace(/\.md$/, '_tasks'))
+      await this.rebindRenamedProject(
+        cachedProject,
+        normalizedOld,
+        newPath,
+        oldTaskFolder,
+        newTaskFolder,
+        file.basename
+      )
+      return
+    }
+    // Otherwise it may be a task file renamed inside a loaded project's folder.
+    await this.rebindRenamedTaskFile(normalizedOld, file)
+  }
+
+  /**
+   * Shared rebind for a renamed project (used by both the outbound and inbound
+   * paths). The project .md is assumed already at `newPath`; this cascades the
+   * `<Name>_tasks` folder to follow the name, re-points each task's filePath,
+   * moves the store's per-project bookkeeping to the new key, updates the
+   * identity fields, and persists the new title (and `path` when the folder moved).
+   */
+  private async rebindRenamedProject(
+    project: Project,
+    oldPath: string,
+    newPath: string,
+    oldTaskFolder: string,
+    newTaskFolder: string,
+    newTitle: string
+  ): Promise<void> {
+    if (oldTaskFolder !== newTaskFolder) {
+      const folder = this.app.vault.getAbstractFileByPath(oldTaskFolder)
+      if (folder instanceof TFolder && !this.app.vault.getAbstractFileByPath(newTaskFolder)) {
+        this.markSelfWrite(oldTaskFolder)
+        this.markSelfWrite(newTaskFolder)
+        await this.app.fileManager.renameFile(folder, newTaskFolder)
+      }
+      // Re-point every task's in-memory filePath under the new folder (R15).
+      const oldPrefix = oldTaskFolder + '/'
+      const newPrefix = newTaskFolder + '/'
+      for (const { task } of flattenTasks(project.tasks)) {
+        const fp = task.filePath ? normalizePath(task.filePath) : ''
+        if (fp.startsWith(oldPrefix)) {
+          const rebased = newPrefix + fp.slice(oldPrefix.length)
+          this.markSelfWrite(fp)
+          this.markSelfWrite(rebased)
+          task.filePath = rebased
+        }
+      }
+    }
+
+    // Move per-project bookkeeping from the old key to the new one.
+    const dirty = this.dirtyTasks.get(oldPath)
+    this.dirtyTasks.delete(oldPath)
+    const queue = this.saveQueues.get(oldPath)
+    this.saveQueues.delete(oldPath)
+    this.projectCache.delete(oldPath)
+
+    project.title = newTitle
+    project.filePath = newPath
+    // Keep the declared `path` frontmatter aligned with the file's actual parent
+    // folder when the item moved directories; a same-folder rename leaves it be.
+    if (project.path !== undefined) project.path = parentDirOf(newPath)
+
+    if (dirty) this.dirtyTasks.set(newPath, dirty)
+    if (queue) this.saveQueues.set(newPath, queue)
+    this.projectCache.set(newPath, project)
+
+    await this.saveProject(project)
+  }
+
+  /** Rebind a single loaded task whose file was renamed in the vault (R12). */
+  private async rebindRenamedTaskFile(oldPath: string, file: TFile): Promise<void> {
+    const newPath = normalizePath(file.path)
+    for (const project of this.projectCache.values()) {
+      const taskFolder = normalizePath(this.projectTaskFolder(project))
+      if (!oldPath.startsWith(taskFolder + '/')) continue
+      const match = flattenTasks(project.tasks).find(
+        (f) => f.task.filePath && normalizePath(f.task.filePath) === oldPath
+      )
+      if (!match) return
+      const task = match.task
+      task.filePath = newPath
+      task.title = file.basename
+      task.archived = newPath.startsWith(normalizePath(taskFolder + '/Archive') + '/')
+      this.markSelfWrite(newPath)
+      await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+        fm.title = task.title
+      })
+      return
     }
   }
 

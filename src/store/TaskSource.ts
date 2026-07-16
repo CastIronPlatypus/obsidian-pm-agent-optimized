@@ -48,6 +48,24 @@ export interface TaskSource {
    * Returns null (without throwing) for a non-pm-task / malformed / out-of-folder file.
    */
   ingestExternalTask(project: Project, file: TFile): Promise<Task | null>
+  /**
+   * Route a vault create/modify of a possibly-external pm-task file to ingestion,
+   * skipping the store's own writes. Returns the ingested task, or null when the
+   * file is a self-write, a non-task, or outside every loaded project's folder.
+   */
+  handleExternalTaskChange(file: TFile): Promise<Task | null>
+  /**
+   * Rename a loaded project via the plugin: rename its `.md` file and `<Name>_tasks`
+   * folder on disk, keep tasks attached, and persist the new title. Self-marks the
+   * paths so the resulting vault rename events do not echo back.
+   */
+  renameProject(project: Project, newTitle: string): Promise<void>
+  /**
+   * Map an inbound vault rename (old path → renamed file) onto the loaded item and
+   * update its name in memory + persisted title; cascades a project's `<Name>_tasks`
+   * folder so tasks stay attached. A no-op when the old path resolves to no loaded item.
+   */
+  handleExternalRename(oldPath: string, file: TFile): Promise<void>
   duplicateTask(project: Project, sourceId: string, includeSubtasks: boolean): Promise<Task | null>
   importNoteAsTask(project: Project, file: TFile, opts: ImportNoteOptions): Promise<'imported' | 'skipped'>
   importTaskForest(
