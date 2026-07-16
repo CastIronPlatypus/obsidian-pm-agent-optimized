@@ -43,6 +43,10 @@ export function serializeProject(project: Project, statuses: StatusConfig[] = []
     createdAt: project.createdAt,
     updatedAt: project.updatedAt
   }
+  // Vault-relative directory this project lives in. Written only when declared,
+  // so legacy projects don't gain a spurious key on rewrite; blank/absent falls
+  // back to the file's parent folder on load (ProjectStore.projectDirectory).
+  if (project.path) fm.path = project.path
   const config = serializeProjectConfig(project.config)
   if (config) fm.config = config
 

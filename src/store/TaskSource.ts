@@ -28,6 +28,10 @@ export interface TaskSource {
   configFor(project: Project): ResolvedProjectConfig
 
   loadAllProjects(folder: string): Promise<Project[]>
+  /** Find every `pm-project: true` file anywhere in the vault (not just a configured root). */
+  discoverProjects(): Promise<Project[]>
+  /** The vault-relative directory a project lives in: its `path` frontmatter, else the file's parent folder. */
+  projectDirectory(project: Project): string
   loadProject(file: TFile): Promise<Project | null>
   loadTaskBody(task: Task): Promise<void>
   loadProjectBody(project: Project): Promise<void>

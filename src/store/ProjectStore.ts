@@ -249,19 +249,48 @@ export class ProjectStore implements TaskSource {
 
   // ─── Load ──────────────────────────────────────────────────────────────────
 
+  /**
+   * Load every project in the vault. Since INT-014 the `folder` argument is only
+   * a create-time default (seeded so a fresh vault has somewhere to put its first
+   * project); it no longer bounds discovery. Projects are found vault-wide via
+   * `discoverProjects`, so a project filed under any category subfolder shows up.
+   */
   async loadAllProjects(folder: string): Promise<Project[]> {
+    // Keep the default folder around so first-run flows have a home to write to.
     await this.ensureFolder(folder)
-    // Walk the projects folder directly. Don't scan the whole vault.
-    const folderObj = this.app.vault.getAbstractFileByPath(folder)
-    const files: TFile[] = []
-    if (folderObj instanceof TFolder) {
-      for (const child of folderObj.children) {
-        if (child instanceof TFile && child.extension === 'md') files.push(child)
-      }
+    return this.discoverProjects()
+  }
+
+  /**
+   * Find every `pm-project: true` file anywhere in the vault, not just under a
+   * configured root (INT-014, R9). Uses metadataCache to skip non-project files
+   * cheaply; on a cache miss the file is read and filtered by `loadProject`.
+   */
+  async discoverProjects(): Promise<Project[]> {
+    const candidates: TFile[] = []
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cached = this.app.metadataCache.getFileCache(file)?.frontmatter
+      // A resolved cache that isn't a project lets us skip the read; a cache miss
+      // (cached == null) still needs loadProject to read and decide.
+      if (cached && cached[FRONTMATTER_KEY] !== true) continue
+      candidates.push(file)
     }
-    const loaded = await Promise.all(files.map((f) => this.loadProject(f)))
+    const loaded = await Promise.all(candidates.map((f) => this.loadProject(f)))
     const projects = loaded.filter((p): p is Project => p !== null)
     return projects.sort((a, b) => a.title.localeCompare(b.title))
+  }
+
+  /**
+   * Resolve the vault-relative directory a project lives in: its declared `path`
+   * frontmatter when present and non-blank, otherwise the file's actual parent
+   * folder (legacy fallback, R11). Task files resolve against this directory.
+   */
+  projectDirectory(project: Project): string {
+    const declared = project.path?.trim()
+    if (declared) return declared
+    const fp = project.filePath
+    const idx = fp.lastIndexOf('/')
+    return idx > 0 ? fp.slice(0, idx) : ''
   }
 
   async loadProject(file: TFile): Promise<Project | null> {
@@ -680,6 +709,9 @@ export class ProjectStore implements TaskSource {
     const safeName = title.replace(/[\\/:*?"<>|]/g, '-')
     const filePath = normalizePath(`${folder}/${safeName}.md`)
     const project = makeProject(title, filePath)
+    // Persist the caller-supplied directory as the project's `path` so discovery
+    // and task resolution can honor it wherever the file lives (INT-014, R8/R10).
+    project.path = folder
     await this.ensureFolder(this.projectTaskFolder(project))
     await this.saveProject(project)
     return project

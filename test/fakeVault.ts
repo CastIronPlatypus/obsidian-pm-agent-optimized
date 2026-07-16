@@ -29,6 +29,15 @@ export class FakeVault {
     return this.files.get(n)?.file ?? this.folders.get(n) ?? null
   }
 
+  /** Vault-wide markdown enumerator, mirroring Obsidian's `Vault.getMarkdownFiles()`. */
+  getMarkdownFiles(): TFile[] {
+    const out: TFile[] = []
+    for (const { file } of this.files.values()) {
+      if (file.extension === 'md') out.push(file)
+    }
+    return out
+  }
+
   async cachedRead(file: TFile): Promise<string> {
     return this.files.get(file.path)?.content ?? ''
   }

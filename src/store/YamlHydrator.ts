@@ -127,6 +127,7 @@ export function hydrateProjectFromFrontmatter(
     createdAt: (frontmatter.createdAt as string) ?? new Date().toISOString(),
     updatedAt: (frontmatter.updatedAt as string) ?? new Date().toISOString(),
     filePath,
+    path: typeof frontmatter.path === 'string' && frontmatter.path ? frontmatter.path : undefined,
     savedViews: hydrateSavedViews((frontmatter.savedViews as unknown[]) ?? []),
     config: hydrateProjectConfig(frontmatter.config),
     taskIndex: new Map()

@@ -112,6 +112,26 @@ export class ProjectModal extends Modal {
       titleInput.select()
     }, 50)
 
+    // ── Folder (new projects only) ────────────────────────────────────────────
+    // Destination directory for the project file, seeded from the global
+    // projects-folder default. Since INT-014 the setting is only this default;
+    // the chosen folder is persisted as the project's `path` frontmatter.
+    let directory = this.plugin.settings.projectsFolder
+    if (this.isNew) {
+      const dirSection = el.createDiv('pm-project-modal-section')
+      dirSection.createEl('label', { text: 'Folder', cls: 'pm-label' })
+      const dirInput = dirSection.createEl('input', {
+        type: 'text',
+        value: directory,
+        cls: 'pm-input'
+      })
+      dirInput.placeholder = 'Projects'
+      dirInput.addEventListener('input', () => {
+        directory = dirInput.value
+      })
+      dirSection.createDiv({ text: 'Vault folder this project lives in.', cls: 'pm-modal-hint' })
+    }
+
     // ── Color ─────────────────────────────────────────────────────────────────
     const colorSection = el.createDiv('pm-project-modal-section')
     colorSection.createEl('label', { text: 'Color', cls: 'pm-label' })
@@ -300,8 +320,10 @@ export class ProjectModal extends Modal {
           this.project.title = title
 
           if (this.isNew) {
-            this.project.filePath = `${this.plugin.settings.projectsFolder}/${title.replace(/[\\/:*?"<>|]/g, '-')}.md`
-            await this.plugin.store.ensureFolder(this.plugin.settings.projectsFolder)
+            const folder = directory.trim() || this.plugin.settings.projectsFolder
+            this.project.path = folder
+            this.project.filePath = `${folder}/${title.replace(/[\\/:*?"<>|]/g, '-')}.md`
+            await this.plugin.store.ensureFolder(folder)
           }
 
           await this.plugin.store.saveProject(this.project)

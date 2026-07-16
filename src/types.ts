@@ -68,6 +68,12 @@ export interface Project {
   createdAt: string
   updatedAt: string
   filePath: string // resolved vault path
+  /**
+   * Vault-relative directory that contains this project's file, declared in the
+   * project's `path` frontmatter. Blank/absent resolves to the file's actual
+   * parent folder (see `ProjectStore.projectDirectory`). Chosen at create time.
+   */
+  path?: string
   savedViews: SavedView[]
   /** Per-project overrides for the global settings. Absent fields inherit. */
   config?: ProjectConfig
@@ -142,6 +148,11 @@ export interface PriorityConfig {
 }
 
 export interface PMSettings {
+  /**
+   * Default directory seeded into the create-project modal's path field. Since
+   * INT-014 this is only a create-time default — no longer a discovery boundary;
+   * discovery scans the whole vault for `pm-project: true` files.
+   */
   projectsFolder: string
   defaultView: ViewMode
   ganttGranularity: GanttGranularity
