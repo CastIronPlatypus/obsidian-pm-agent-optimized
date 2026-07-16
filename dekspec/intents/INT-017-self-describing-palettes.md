@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -132,6 +132,17 @@ verification:
     cmd: vitest run src/intention.test.ts
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the materialization work shipped on `main` via direct commits (this repo has no `int/` branch corpus and no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS-005/IB-005 ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| submission-lint-clean | `pnpm check:submission` | PASS (exit 0) |
+| full-suite-green | `pnpm test` | PASS (266 passed, 1 skipped) |
+| intention-contract-r22-r25 | `vitest run src/intention.test.ts` | PASS (24 passed, 1 skipped; the four R22–R25 cases via `vitest run src/intention.test.ts -t "Feature 5"` → 4 passed) |
+
 ## Outcome Verification
 
 On a project saved by the store, the on-disk frontmatter carries `config.statuses` whose ids equal the effective palette and `config.materialized: true` (R22); a legacy project with no config block gains that same materialized block on its first save (R23). On ingestion, a task file whose `status: Todo` mis-cases the known id `todo` loads with `status: 'todo'` (normalized), while a task file whose `status: blocked-ish` is unknown loads with `status: 'blocked-ish'` preserved (R24). A project with an explicit `config.statuses` override still resolves that override through `configFor` after a save+reload round-trip and is not re-tagged materialized (R25). These are the R22–R25 contracts in `src/intention.test.ts`; they land red-first (materialization + normalization absent) per ADR-029 and are made green by the implementation without weakening any other test. `outcome_verification_grandfathered: false`.
@@ -150,13 +161,13 @@ On a project saved by the store, the on-disk frontmatter carries `config.statuse
 
 ## Post-implementation sync
 
-*Pending — INT-017 is at IMPLEMENTING; this section is completed at the land step (U15) once the implementation lands and the verification predicate is re-evaluated from `main`.*
+*Synced 2026-07-16 (land step, U15). Work merged to `main`; no tail items outstanding.*
 
-- [ ] Materialization write-through implemented in the save path; `config.materialized` marker written for materialized blocks only.
-- [ ] Resolver re-derives materialized blocks from the global palette; genuine-override semantics unchanged (R25 green).
-- [ ] Ingestion normalizes case-variant known ids and preserves unknown values (R24 green).
-- [ ] Verification predicate green from `main`, including `pnpm check:submission`.
-- [ ] Linked AE (AE-001) at ACCEPTED — no status inversion remains.
+- [x] Materialization write-through implemented in the save path; `config.materialized` marker written for materialized blocks only (`YamlSerializer.ts` / `ProjectStore.ts`).
+- [x] Resolver re-derives materialized blocks from the global palette; genuine-override semantics unchanged (R25 green, `ProjectConfig.ts` / `YamlHydrator.ts`).
+- [x] Ingestion normalizes case-variant known ids and preserves unknown values (R24 green).
+- [x] Verification predicate green from `main`, including `pnpm check:submission` (see Testpass results).
+- [x] Linked AE (AE-001) at ACCEPTED — no status inversion remains.
 
 ## Amendment Log
 
@@ -165,3 +176,5 @@ On a project saved by the store, the on-disk frontmatter carries `config.statuse
 | 2026-07-16 | Substantive | Intent authored; inline `--analyze` performed against the pinned R22–R25 contract (Coverage/Size/Layer/Verification populated); round-trip-safety marker (`config.materialized`) and unknown-status preservation pinned; 6-glob component cap accepted-with-justification (atomic self-describing-palette surface), all other caps PASS. Created at PROPOSED with acceptance pre-authorized by the engineer ("user-approved autopilot 2026-07-16"). | Claude (U13 intent-authoring agent) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 ("user-approved autopilot 2026-07-16", recorded in Source); that recording is the authorization cited here. No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (U13, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-005 + IB-005. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. Implementation (TDD against R22–R25) and land handed to U14/U15. | Claude (U13) |
+| 2026-07-16 | Substantive | All Verification checks green from main (pnpm check exit 0; pnpm check:submission exit 0; pnpm test 266 passed/1 skipped; vitest src/intention.test.ts 24 passed/1 skipped — Feature 5 R22–R25 = 4 passed). Branch-diff/bead gates N/A — work shipped on main, no int/ branch or dekbeads corpus. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (U15 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-005/IB-005 >= ACCEPTED. Linked AE AE-001 already ACCEPTED (no status inversion). TESTPASS to LOCKED via /write-intent --lock. | Claude (U15 land agent) |
