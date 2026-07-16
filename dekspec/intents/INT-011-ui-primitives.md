@@ -2,7 +2,7 @@
 
 ## Status
 
-LOCKED
+PROPOSED
 
 ## Intent type
 
@@ -101,3 +101,4 @@ _None._
 | Date | Type | Change | Author |
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | Retroactive adoption: Intent authored and locked directly against the current (already-shipped, CI-green) state of `["src/ui/primitives/**","src/ui/StatusBadge.ts","src/ui/FormField.ts","src/ui/FilterDropdown.ts","src/ui/PaletteListEditor.ts","src/ui/TaskContextMenu.ts","src/views/styleguide/**","src/styles/chrome.css","src/styles/index.css","src/styles/styleguide.css","src/styles/utilities.css","src/styles/variables.css","src/styles/widgets.css","docs/styleguide.md"]` at commit 511ec7b, per engineer authorization to bring pre-existing code under DekSpec without the branch/merge pipeline. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | Unlocked for ongoing revision: retroactively-adopted adoption Intents stay mutable while we work in this repo. | 60890286+jeffhaskin@users.noreply.github.com |

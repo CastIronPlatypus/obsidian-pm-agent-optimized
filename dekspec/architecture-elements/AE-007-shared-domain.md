@@ -2,7 +2,7 @@
 
 ## Status
 
-LOCKED
+PROPOSED
 
 ## Subtype
 
@@ -93,3 +93,4 @@ The scope is deliberately definitional and functional, not behavioral: it declar
 | Date | Type | Change | Author |
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | Retroactive adoption: AE authored and locked directly against the current (already-shipped, CI-green) state of the shared domain slice (`src/types.ts`, `src/dates.ts`, `src/dates.test.ts`, `src/utils.ts`, `src/env.d.ts`) at commit 511ec7b, per engineer authorization to bring pre-existing code under DekSpec without the branch/merge pipeline. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | Unlocked for ongoing revision: retroactively-adopted AEs stay mutable while we work in this repo and discover issues. | 60890286+jeffhaskin@users.noreply.github.com |
