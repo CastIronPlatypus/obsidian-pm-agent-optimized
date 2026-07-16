@@ -2,7 +2,7 @@
 
 ## Status
 
-PROPOSED
+LOCKED
 
 ## Intent type
 
@@ -109,3 +109,4 @@ _None._
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | Retroactive adoption: Intent authored and locked directly against the current (already-shipped, CI-green) state of `["package.json","pnpm-lock.yaml","pnpm-workspace.yaml","tsconfig.json","tsdown.config.ts","vitest.config.ts","oxlint.config.ts","eslint.config.mjs",".oxfmtrc.json",".editorconfig",".npmrc",".gitignore","scripts/**",".github/**","docs/**","manifest.json","versions.json","test/**","CHANGELOG.md","LICENSE","README.md"]` at commit 511ec7b, per engineer authorization to bring pre-existing code under DekSpec without the branch/merge pipeline. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Unlocked for ongoing revision: retroactively-adopted adoption Intents stay mutable while we work in this repo. | 60890286+jeffhaskin@users.noreply.github.com |
+| 2026-07-16 | Substantive | retroactive-adoption intent; describes shipped subsystem; locked at engineer direction, reversible via --unlock | Claude (engineer-directed) |

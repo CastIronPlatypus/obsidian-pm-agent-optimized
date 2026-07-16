@@ -2,7 +2,7 @@
 
 ## Status
 
-PROPOSED
+ACCEPTED
 
 ## Subtype
 
@@ -115,3 +115,4 @@ The slice pairs the orchestrating class (`KanbanView.ts`) with its dedicated sty
 |------|------|--------|--------|
 | 2026-07-16 | Substantive | Retroactive adoption: AE authored and locked directly against the current (already-shipped, CI-green) state of `src/views/KanbanView.ts` and `src/styles/kanban.css` at commit 511ec7b, per engineer authorization to bring pre-existing code under DekSpec without the branch/merge pipeline. | Claude (engineer-directed) |
 | 2026-07-16 | Substantive | Unlocked for ongoing revision: retroactively-adopted AEs stay mutable while we work in this repo and discover issues. | 60890286+jeffhaskin@users.noreply.github.com |
+| 2026-07-16 | Substantive | Raised to ACCEPTED so foundation Intents can lock without status inversion; retroactive-adoption AE, reversible via reverse transition. | Claude (engineer-directed) |
