@@ -20,15 +20,19 @@ import {
 import { parseArgs, type FlagMap, type ParsedCommand } from './args'
 import type { PmContext } from './PmContext'
 import { renderNdjson, renderPorcelain, renderPretty } from './render'
-import { newMilestone, newProject, newSubtask, newTask } from './commands/create'
+import { importNote, newMilestone, newProject, newSubtask, newTask } from './commands/create'
 import {
   archive,
   assign,
   due,
+  dup,
   mv,
   note,
   priority as setPriority,
+  reconcile,
   rename,
+  reorder,
+  rm,
   set,
   shift,
   status,
@@ -36,6 +40,9 @@ import {
 } from './commands/update'
 import { depend, undepend } from './commands/deps'
 import { apply } from './commands/apply'
+import { blockers, criticalPath, graph, rollup, validate } from './commands/analysis'
+import { batch, exportProject, restore, snapshot } from './commands/declarative'
+import { watchCmd } from './commands/live'
 import {
   agenda,
   blocked,
@@ -79,6 +86,7 @@ const HANDLERS: Record<string, Handler> = {
   'new task': newTask,
   'new subtask': newSubtask,
   'new milestone': newMilestone,
+  import: importNote,
   set,
   status,
   assign,
@@ -88,11 +96,25 @@ const HANDLERS: Record<string, Handler> = {
   rename,
   mv,
   shift,
+  reorder,
+  dup,
+  rm,
+  reconcile,
   archive,
   unarchive,
   depend,
   undepend,
-  apply
+  apply,
+  graph,
+  'critical-path': criticalPath,
+  blockers,
+  validate,
+  rollup,
+  export: exportProject,
+  snapshot: (ctx) => snapshot(ctx),
+  restore,
+  batch: (ctx) => batch(ctx),
+  watch: watchCmd
 }
 
 type OutMode = 'pretty' | 'json' | 'porcelain' | 'ndjson'

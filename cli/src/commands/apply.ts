@@ -1,24 +1,25 @@
 // `apply <spec>` — declarative, idempotent project-as-code upsert.
 //
-// A spec (YAML/JSON) describes a whole nested project. Every node carries a
-// client-supplied stable `key`; `apply` maps each key to a real minted id and
-// persists that mapping in a CLI-owned sidecar so re-applying an unchanged spec
-// is a NO-OP (create missing → update changed → leave equal). The store's tested
-// mutators (`createProject`/`insertTask`/`updateTask`/`moveProject`/
-// `renameProject`/`archiveTask`) do all the writing; `apply` only diffs and
-// orchestrates.
+// A spec (YAML/JSON, from a file path or `-` for stdin) describes a whole nested
+// project. Every node carries a client-supplied stable `key`; `apply` maps each
+// key to a real minted id and persists that mapping in a CLI-owned sidecar so
+// re-applying an unchanged spec is a NO-OP (create missing → update changed →
+// leave equal). The store's tested mutators (`createProject`/`insertTask`/
+// `updateTask`/`reorderTask`/`moveProject`/`renameProject`/`archiveTask`) do all
+// the writing, wrapped in a single `transact` (one save + one schedule pass);
+// `apply` only diffs and orchestrates.
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { parse as parseYaml } from 'yaml'
+import { parseYaml } from 'obsidian'
 import type { Project, Task } from '../../../src/types'
 import { makeTask } from '../../../src/types'
-import { findTaskById } from '../../../src/store'
+import { findTaskById, flattenTasks } from '../../../src/store'
 import type { PmContext } from '../PmContext'
 import { PmError, type HandlerOutput } from '../envelope'
 import type { ParsedCommand } from '../args'
 import { flagBool } from '../args'
-import { cascadeAfterMutation } from '../schedule'
+import type { ViewSpec } from '../render'
 
 // ─── Spec shape ─────────────────────────────────────────────────────────────
 
@@ -115,17 +116,52 @@ function diffPatch(task: Task, patch: Partial<Task>): Partial<Task> {
   return out
 }
 
+function normalize(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+/** A `start|due` fingerprint per task id, to name scheduler-moved tasks post-commit. */
+function dateFingerprint(project: Project): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const f of flattenTasks(project.tasks)) map.set(f.task.id, `${f.task.start}|${f.task.due}`)
+  return map
+}
+
+// ─── Terraform-style diff (dry-run) ──────────────────────────────────────────
+
+interface DiffPlan {
+  creates: string[] // titles
+  updates: Array<{ id: string; fields: string[] }>
+  archives: Array<{ id: string; title: string }>
+  changedIds: string[]
+}
+
+function renderDiff(plan: DiffPlan): ViewSpec {
+  const lines: string[] = []
+  for (const title of plan.creates) lines.push(`+ create ${title}`)
+  for (const u of plan.updates) lines.push(`~ update [${u.id}] ${u.fields.join(', ')}`)
+  for (const a of plan.archives) lines.push(`- archive [${a.id}] ${a.title}`)
+  const summary = `${plan.creates.length} to create · ${plan.updates.length} to update · ${plan.archives.length} to archive`
+  const body = lines.length ? lines.join('\n') : 'no changes'
+  return { format: 'plain', text: `${body}\n\n${summary} · dry run — nothing written` }
+}
+
 // ─── The apply orchestration ────────────────────────────────────────────────
 
 export async function apply(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerOutput> {
   const specPath = cmd.positionals[0]
-  if (!specPath) throw new PmError('E_USAGE', 'apply requires a spec path')
+  if (!specPath) throw new PmError('E_USAGE', 'apply requires a spec path (or "-" for stdin)')
   const dryRun = flagBool(cmd.flags, 'dry-run') || flagBool(cmd.flags, 'diff')
   const prune = flagBool(cmd.flags, 'prune')
 
   let spec: Spec
   try {
-    spec = parseYaml(readFileSync(specPath, 'utf8')) as Spec
+    const raw = specPath === '-' ? readFileSync(0, 'utf8') : readFileSync(specPath, 'utf8')
+    spec = parseYaml(raw) as Spec
   } catch (e) {
     throw new PmError('E_USAGE', `could not read spec "${specPath}": ${e instanceof Error ? e.message : String(e)}`)
   }
@@ -135,28 +171,91 @@ export async function apply(ctx: PmContext, cmd: ParsedCommand): Promise<Handler
   const projectKey = spec.project.key ?? spec.project.title
   const entry: KeyEntry = keyMap[projectKey] ?? { projectId: '', tasks: {} }
 
-  const changed: string[] = []
-  const plan: string[] = []
-
   const flat: FlatNode[] = []
   flattenSpec(spec.tasks, null, flat)
+  const specKeys = new Set(flat.map((f) => f.key))
 
-  // ── Resolve (or create) the project ──
+  // ── Resolve the project (by mapped id, else by title on first run) ──
   const all = await ctx.store.discoverProjects()
   let project =
     (entry.projectId ? all.find((p) => p.id === entry.projectId) : undefined) ??
     all.find((p) => p.title === spec.project.title)
 
-  if (!project) {
-    plan.push(`+ project ${spec.project.title}`)
-    for (const { node } of flat) plan.push(`+ task ${node.title}`)
-    if (dryRun) {
-      return { data: { plan, dry_run: true }, changed_ids: [projectKey, ...flat.map((f) => f.key)] }
+  // ── Dry-run: compute the diff against current state, WRITE NOTHING ──
+  if (dryRun) {
+    const plan: DiffPlan = { creates: [], updates: [], archives: [], changedIds: [] }
+    const keyToId = { ...entry.tasks }
+
+    if (!project) {
+      plan.creates.push(spec.project.title)
+      plan.changedIds.push(projectKey)
+      for (const { node } of flat) {
+        plan.creates.push(node.title)
+        plan.changedIds.push(node.key ?? node.title)
+      }
+      const view = renderDiff(plan)
+      return { data: { project: projectKey, dry_run: true, plan: view.text }, view, changed_ids: plan.changedIds }
     }
+
+    // Project drift (dir → move, title → rename) reads as an update on the project.
+    const projFields: string[] = []
+    if (spec.project.dir && normalize(spec.project.dir) !== normalize(ctx.store.projectDirectory(project))) {
+      projFields.push('dir')
+    }
+    if (spec.project.title !== project.title) projFields.push('title')
+    if (projFields.length) {
+      plan.updates.push({ id: project.id, fields: projFields })
+      plan.changedIds.push(project.id)
+    }
+
+    for (const { node, key } of flat) {
+      const existing = keyToId[key] ? findTaskById(project, keyToId[key]!) : null
+      if (existing) {
+        const patch = diffPatch(existing, specPatch(node))
+        if (Object.keys(patch).length > 0) {
+          plan.updates.push({ id: existing.id, fields: Object.keys(patch) })
+          plan.changedIds.push(existing.id)
+        }
+      } else {
+        plan.creates.push(node.title)
+        plan.changedIds.push(key)
+      }
+    }
+
+    if (prune) {
+      for (const [oldKey, oldId] of Object.entries(entry.tasks)) {
+        if (specKeys.has(oldKey)) continue
+        const stale = findTaskById(project, oldId)
+        if (stale && !stale.archived) {
+          plan.archives.push({ id: oldId, title: stale.title })
+          plan.changedIds.push(oldId)
+        }
+      }
+    }
+
+    const view = renderDiff(plan)
+    return {
+      data: { project: project.id, dry_run: true, plan: view.text },
+      view,
+      changed_ids: [...new Set(plan.changedIds)]
+    }
+  }
+
+  // ── Real run ──
+  const changed: string[] = []
+
+  // Project create / drift happen OUTSIDE the transact (they are their own
+  // file operations; the project must exist before we can transact on it).
+  if (!project) {
     project = await ctx.store.createProject(spec.project.title, spec.project.dir ?? '')
     changed.push(project.id)
-  } else if (!dryRun) {
-    // Existing project: apply `dir` (move) / `title` (rename) drift.
+    if (spec.project.icon || spec.project.color || spec.project.description) {
+      if (spec.project.icon) project.icon = spec.project.icon
+      if (spec.project.color) project.color = spec.project.color
+      if (spec.project.description) project.description = spec.project.description
+      await ctx.store.saveProject(project)
+    }
+  } else {
     if (spec.project.dir && normalize(spec.project.dir) !== normalize(ctx.store.projectDirectory(project))) {
       await ctx.store.moveProject(project, spec.project.dir)
       changed.push(project.id)
@@ -166,71 +265,84 @@ export async function apply(ctx: PmContext, cmd: ParsedCommand): Promise<Handler
       changed.push(project.id)
     }
   }
-
   entry.projectId = project.id
 
-  // ── Upsert each task node (pre-order, parents before children) ──
   const keyToId: Record<string, string> = { ...entry.tasks }
-  const specKeys = new Set(flat.map((f) => f.key))
+  const before = dateFingerprint(project)
 
-  for (const { node, key, parentKey } of flat) {
-    const parentId = parentKey ? (keyToId[parentKey] ?? null) : null
-    const existing = keyToId[key] ? findTaskById(project, keyToId[key]!) : null
-
-    if (existing) {
-      const patch = diffPatch(existing, specPatch(node))
-      if (Object.keys(patch).length > 0) {
-        plan.push(`~ task ${node.title}`)
-        if (!dryRun) await ctx.store.updateTask(project, existing.id, patch)
-        changed.push(existing.id)
-      }
-    } else {
-      plan.push(`+ task ${node.title}`)
-      if (dryRun) {
-        changed.push(key)
-        keyToId[key] = key // placeholder so children resolve in the plan
+  await ctx.store.transact(project, async () => {
+    // Upsert each node (pre-order, parents before children).
+    for (const { node, key, parentKey } of flat) {
+      const parentId = parentKey ? (keyToId[parentKey] ?? null) : null
+      const existing = keyToId[key] ? findTaskById(project!, keyToId[key]!) : null
+      if (existing) {
+        const patch = diffPatch(existing, specPatch(node))
+        if (Object.keys(patch).length > 0) {
+          await ctx.store.updateTask(project!, existing.id, patch)
+          changed.push(existing.id)
+        }
+        keyToId[key] = existing.id
       } else {
         const task = makeTask(specPatch(node))
-        await ctx.store.insertTask(project, task, parentId)
+        await ctx.store.insertTask(project!, task, parentId)
         keyToId[key] = task.id
         changed.push(task.id)
       }
     }
-  }
 
-  if (dryRun) return { data: { project: project.id, plan, dry_run: true }, changed_ids: [...new Set(changed)] }
-
-  // ── Resolve deps-by-key (post-topological) and wire only changed edges ──
-  for (const { node, key } of flat) {
-    if (!node.depends_on?.length) continue
-    const taskId = keyToId[key]
-    const task = taskId ? findTaskById(project, taskId) : null
-    if (!task || !taskId) continue
-    const resolved = node.depends_on.map((k) => keyToId[k] ?? k)
-    const next = [...new Set([...task.dependencies, ...resolved])]
-    if (next.sort().join(' ') !== [...task.dependencies].sort().join(' ')) {
-      await ctx.store.updateTask(project, taskId, { dependencies: next })
-      changed.push(taskId)
-    }
-  }
-
-  // ── Prune: archive previously-managed tasks now absent from the spec ──
-  if (prune) {
-    for (const [oldKey, oldId] of Object.entries(entry.tasks)) {
-      if (specKeys.has(oldKey)) continue
-      const stale = findTaskById(project, oldId)
-      if (stale && !stale.archived) {
-        await ctx.store.archiveTask(project, oldId)
-        changed.push(oldId)
+    // Resolve depends_on by key→id now that every node exists (forward refs OK).
+    for (const { node, key } of flat) {
+      if (!node.depends_on?.length) continue
+      const taskId = keyToId[key]
+      const task = taskId ? findTaskById(project!, taskId) : null
+      if (!task || !taskId) continue
+      const resolved = node.depends_on.map((k) => keyToId[k] ?? k)
+      const next = [...new Set([...task.dependencies, ...resolved])]
+      if (!arraysEqual([...next].sort(), [...task.dependencies].sort())) {
+        await ctx.store.updateTask(project!, taskId, { dependencies: next })
+        changed.push(taskId)
       }
-      delete keyToId[oldKey]
     }
-  }
 
-  // ── One scheduler pass per touched project when something changed ──
-  if (changed.length > 0) {
-    const moved = await cascadeAfterMutation(ctx, project)
-    for (const id of moved) if (!changed.includes(id)) changed.push(id)
+    // Sibling order follows spec order — reorder only when actually out of order.
+    const groups = new Map<string | null, string[]>()
+    for (const { key, parentKey } of flat) {
+      const g = groups.get(parentKey) ?? []
+      g.push(key)
+      groups.set(parentKey, g)
+    }
+    for (const [parentKey, keys] of groups) {
+      const desiredIds = keys.map((k) => keyToId[k]).filter((id): id is string => Boolean(id))
+      if (desiredIds.length < 2) continue
+      const siblings =
+        parentKey === null ? project!.tasks : (findTaskById(project!, keyToId[parentKey] ?? '')?.subtasks ?? [])
+      const actual = siblings.map((t) => t.id).filter((id) => desiredIds.includes(id))
+      if (arraysEqual(actual, desiredIds)) continue
+      for (let i = 1; i < desiredIds.length; i++) {
+        await ctx.store.reorderTask(project!, desiredIds[i]!, desiredIds[i - 1]!, 'after')
+        if (!changed.includes(desiredIds[i]!)) changed.push(desiredIds[i]!)
+      }
+    }
+
+    // Prune: archive previously-managed tasks now absent from the spec.
+    if (prune) {
+      for (const [oldKey, oldId] of Object.entries(entry.tasks)) {
+        if (specKeys.has(oldKey)) continue
+        const stale = findTaskById(project!, oldId)
+        if (stale && !stale.archived) {
+          await ctx.store.archiveTask(project!, oldId)
+          changed.push(oldId)
+        }
+        delete keyToId[oldKey]
+      }
+    }
+  })
+
+  // Name any tasks the commit's schedule pass moved.
+  for (const f of flattenTasks(project.tasks)) {
+    const now = `${f.task.start}|${f.task.due}`
+    const prev = before.get(f.task.id)
+    if (prev !== undefined && prev !== now && !changed.includes(f.task.id)) changed.push(f.task.id)
   }
 
   entry.tasks = keyToId
@@ -238,8 +350,4 @@ export async function apply(ctx: PmContext, cmd: ParsedCommand): Promise<Handler
   saveKeyMap(ctx.vaultRoot, keyMap)
 
   return { data: { project: project.id }, changed_ids: [...new Set(changed)] }
-}
-
-function normalize(p: string): string {
-  return p.replace(/\\/g, '/').replace(/\/+$/, '')
 }
