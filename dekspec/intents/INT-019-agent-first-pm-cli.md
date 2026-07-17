@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -149,6 +149,21 @@ verification:
     cmd: pnpm build
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the `pm` CLI work shipped on `main` via direct commits (this repo has no `int/` branch corpus and no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS-009..012 / IB-009..012 >= ACCEPTED; linked AE-013 + AE-001 both ACCEPTED — no status inversion). Verification predicate re-evaluated from `main` (Wave A commit 8f16104 + Wave B commit 95069bd):
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| submission-lint-clean | `pnpm check:submission` | PASS (exit 0) |
+| build | `pnpm build` | PASS (exit 0) |
+| cli-typecheck | `tsc -p cli/tsconfig.json` | PASS (exit 0) |
+| intention-contract-r41-r46 | `vitest run cli/pm.test.ts -t "Feature 9"` | PASS (6 passed — R41–R46 all green) |
+| full-suite-green | `pnpm test` | GREEN — 318 passed, 1 skipped (the pre-existing R21 skip) across 19 files. R41–R46 (`cli/pm.test.ts`) flipped from red-first to green in Wave B; R1–R40 (`src/intention.test.ts`) and every colocated store/CLI unit test remain green. Baseline before Wave B: 2 red (R45/R46); after: 0 red. |
+
+Build-time note (Open Issue, P2 — `apply` key→id location): Wave B persists the `key`→id map in a CLI-owned sidecar at `<vault>/.obsidian/plugins/project-manager/pm-cli-keys.json` rather than a `pmKeys` map on the project file, because the store's `serializeProject` rewrites project frontmatter from a fixed field set (an unknown `pmKeys` key would be dropped on the next save) and AE-001 runs UNMODIFIED. The sidecar keeps identity stable across renames without touching store-owned bytes; relocating it to a vault-native `pmKeys` field remains a follow-on if the store gains a frontmatter escape hatch.
+
 ## Outcome Verification
 
 Against a REAL temp-fs vault: `createPmContext({vault})` exposes the unmodified `ProjectStore`; `store.createProject` + `store.insertTask` write real `.md` files a fresh context round-trips back (R41). `pm new task --project X --parent Y` returns a minted id in the envelope and writes the file at `<dir>/<Project>/<Project>_tasks/<slug>.md` with `parentId` wired and a `<!-- pm:link -->` backlink to the parent (R42). `pm tree <milestoneId> --sub` emits `data.nodes[]` + a `data.legend` with `○ ◐ ● ⊘` and per-node `content_lines` reflecting the INT-021 detector — 0 for a managed-backlink-only note, ≥1 for prose (R43). `pm today` returns lineage-shaped `data.items[]` and a `data.overdue` pointer present only when overdue work exists (R44). `pm set <A> due=…` puts A in `changed_ids` and cascades B (the dependent) into `data.scheduled`/`changed_ids`, persisting B's new due; `--dry-run` sets `meta.dry_run=true` and writes nothing (R45). `pm apply <spec>` creates the nested tree on the first run and reports zero `changed_ids` on an identical re-run (R46). These are the red-first outcome tests R41–R46 in `cli/pm.test.ts`. `outcome_verification_grandfathered: false`.
@@ -167,3 +182,6 @@ Against a REAL temp-fs vault: `createPmContext({vault})` exposes the unmodified 
 | 2026-07-16 | Substantive | Intent authored at PROPOSED; inline `--analyze` performed against the pinned R41–R46 contract (Coverage/Size/Layer/Verification populated). Reuse thesis (unmodified `src/store` over `NodeVaultAdapter`) pinned; JSON envelope + exit-code contract pinned; live mode deferred to INT-023. New AE-013 (CLI container); AE-001 reused unchanged. Size caps (4 IBs/4 WSes/6 gaps) accepted-with-justification (phased CLI). Acceptance pre-authorized by the engineer in full-auto session. | Claude (intent-authoring agent) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 (recorded in Source). No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (engineer-directed, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 4 IUs (4 IBs, 0 direct beads): WS/IB-009 (adapter + read/nav core), -010 (create + single-item mutation core), -011 (dependencies + scheduling + analysis), -012 (declarative apply + batch). No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. R41–R46 authored red-first in `cli/pm.test.ts`. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | Wave B implemented the mutation surface (`set`/`status`/`assign`/`due`/`priority`/`note`/`rename`/`mv`/`shift`/`archive`/`depend`/`undepend`/`apply`) in `cli/src/commands/{update,deps,apply}.ts` + `cli/src/coerce.ts` (typed `k=v` patch) + `cli/src/schedule.ts` (post-mutation `scheduleAfterChange` cascade wiring). Every write delegates to a tested store mutator; the scheduler cascade is default-on (`--no-cascade` opts out; `--dry-run` reports without writing); `depend` cycle-guards via `wouldCreateCycle` (E_CYCLE); `apply` upserts idempotently by client `key` via a CLI-owned sidecar. R45/R46 flipped green; colocated edge tests added in `cli/src/commands/mutation.test.ts`. Wave B commit 95069bd. | Claude (INT-019 Wave B build worker) |
+| 2026-07-16 | Substantive | Verification predicate re-evaluated from main (pnpm check exit 0; pnpm check:submission exit 0; pnpm build exit 0; tsc -p cli/tsconfig.json exit 0; vitest cli/pm.test.ts -t "Feature 9" = R41-R46 6 passed). Full suite GREEN: 318 passed/1 skipped (pre-existing R21 skip), 0 red (baseline before Wave B: 2 red R45/R46). Branch-diff/bead gates N/A -- work shipped on main, no int/ branch or dekbeads corpus. IMPLEMENTING to TESTPASS via ADR-017 Path B. | Claude (INT-019 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B -- all downstream WS-009..012 / IB-009..012 >= ACCEPTED. Linked AE-013 + AE-001 both ACCEPTED (no status inversion). TESTPASS to LOCKED. | Claude (INT-019 land agent) |
