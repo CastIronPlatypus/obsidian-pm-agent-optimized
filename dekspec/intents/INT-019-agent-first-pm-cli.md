@@ -2,7 +2,7 @@
 
 ## Status
 
-PROPOSED
+LOCKED
 
 ## Intent type
 
@@ -185,6 +185,8 @@ verification:
 | 2026-07-17 | unlock | LOCKED → PROPOSED. Reopened: acceptance was a scoped MVP phase (R41–R46) that silently deferred the rendering layer, ~15 commands, most of the flag surface, and watch/snapshot/restore. The phasing itself was the defect. | Claude (transition) |
 | 2026-07-17 | Substantive | REWRITTEN to encode the ENTIRE verbatim requirement surface (sections A–G) as the single acceptance contract — no phasing, no deferral. The engineer's literal requirement exchange is embedded verbatim in the Appendix as the authoritative acceptance rubric. Prior "deferred" non-goals removed; watch/snapshot/restore/export/batch/reconcile/validate/rollup/graph/critical-path/blockers/explain + full rendering layer moved IN SCOPE. Acceptance now requires an adversarial completeness audit vs the verbatim showing zero gaps before re-lock. | Claude (INT-019 rewrite, engineer-directed full-auto 2026-07-17) |
 | 2026-07-17 | Substantive | Adversarial grader (round 1) found 1 dead flag + 4 fidelity defects on the shipped code; all fixed + regression-tested (--no-schedule wired; ✎ ignores the auto `## Subtasks`/`## Tasks` mirrors + project H1; shift --no-cascade truly item-only; show --fields gates body; today/open DFS order). Round 2 found the project-`✎` over-count, `--fields` breadth (show-only), `TaskSource` interface drift, a brittle date test, and a vestigial `--apply` flag — all fixed. Non-Goal reconciled to the true reuse thesis (no forked invariants) since the verbatim's cascade + content-detection behavior necessitates thin additive shared-store methods; `watch` backend de-pinned (fs.watch). | Claude (grader-loop fixes, full-auto 2026-07-17) |
+| 2026-07-17 | Substantive | Full verbatim surface implemented + rendered-output tested; adversarial grader loop (3 passes) certified PASS, zero gaps. | Jeff Haskin (full-auto 2026-07-17) |
+| 2026-07-17 | Substantive | Re-locked: entire pm CLI complete + verified on the rendered surface by 3 independent adversarial graders (final gate PASS, 0 gaps). 398 suite + 86 cli tests green; check/check:submission/build clean. | Jeff Haskin (full-auto 2026-07-17) |
 
 ---
 
