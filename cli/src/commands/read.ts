@@ -233,6 +233,8 @@ export async function tree(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
   const depth = flagNum(cmd.flags, 'depth')
   const rich = flagBool(cmd.flags, 'rich')
   const transitive = flagBool(cmd.flags, 'transitive')
+  const includeArchived = flagBool(cmd.flags, 'include-archived')
+  const treeOpts = { depth, includeArchived }
 
   const wantNeeds = flagBool(cmd.flags, 'needs') || flagBool(cmd.flags, 'all')
   const wantBlocks = flagBool(cmd.flags, 'blocks') || flagBool(cmd.flags, 'all')
@@ -260,7 +262,7 @@ export async function tree(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
   // Single-section (sub-only) → a flat lineage list including the root.
   const root = located.kind === 'task' ? located.task : null
   if (wantSub && !wantNeeds && !wantBlocks) {
-    const nodes = await buildTreeNodes(ctx, project, root, depth !== undefined ? { depth } : {})
+    const nodes = await buildTreeNodes(ctx, project, root, treeOpts)
     const rows: ViewRow[] = [rootRow]
     for (const n of nodes) {
       if (root && n.id === root.id) continue // buildTreeNodes includes root for a task; skip dup
@@ -278,7 +280,7 @@ export async function tree(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
   // Multi-section (needs/blocks, optionally with sub).
   const sections: ViewSection[] = []
   if (wantSub) {
-    const nodes = await buildTreeNodes(ctx, project, root, depth !== undefined ? { depth } : {})
+    const nodes = await buildTreeNodes(ctx, project, root, treeOpts)
     const rows: ViewRow[] = []
     for (const n of nodes) {
       if (root && n.id === root.id) continue
@@ -567,6 +569,7 @@ export async function show(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
   // Plain rendering: a title line, key fields, then the body.
   const lines: string[] = [titleLine]
   const show = (k: string, v: unknown): void => {
+    if (fields.length && !fields.includes(k)) return // --fields trims the pretty output too
     if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) return
     lines.push(`  ${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`)
   }

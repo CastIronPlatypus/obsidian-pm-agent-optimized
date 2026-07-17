@@ -19,9 +19,18 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runPm } from './src/run'
 import { PORCELAIN_COLUMNS } from './src/render'
+
+// `watch` (the one long-lived verb) is stubbed to a no-op that opens NO real fs
+// handle, so the E5 smoke can prove it starts + emits `ready` without leaking a
+// watcher that would keep vitest alive. Every OTHER `node:fs` fn stays real, so
+// the temp-fs harness (mkdtemp/write/rm/existsSync) is untouched.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual, watch: () => ({ close() {} }) as unknown as ReturnType<typeof actual.watch> }
+})
 
 const NOW = '2026-07-16'
 
@@ -65,6 +74,9 @@ async function withStdin<T>(content: string, fn: () => Promise<T>): Promise<T> {
 function lineWithId(stdout: string, id: string): string | undefined {
   return stdout.split('\n').find((l) => l.includes(`[${id}]`))
 }
+
+/** The minted id an ok mutation/create returned. */
+const idOf = (r: Awaited<ReturnType<typeof run>>): string => String((r.envelope.data ?? {}).id ?? '')
 
 const glyphOf = (s: string) => (s.match(/⚠/g) ?? []).length
 
@@ -541,5 +553,513 @@ describe('exit codes: the full deterministic contract', () => {
     // NEGATIVE CONTROL: the atomic reject wrote nothing — the valid op did not land.
     const find = await run(vault, ['find', 'Valid', '--project', proj])
     expect(find.stdout).not.toContain('Valid')
+  })
+
+  it('1 — a generic (non-PmError) failure maps to exit 1', async () => {
+    // Renaming a project onto a folder that already exists throws a plain Error in
+    // the store (not a PmError) → the dispatcher's generic branch → exit 1.
+    const vault = makeVault()
+    await run(vault, ['new', 'project', '--title', 'Alpha', '--dir', 'Work'])
+    await run(vault, ['new', 'project', '--title', 'Beta', '--dir', 'Work'])
+    const r = await run(vault, ['rename', 'Alpha', '--title', 'Beta'])
+    expect(r.exitCode).toBe(1)
+    expect(r.stdout).toContain('✗ GENERIC:')
+  })
+})
+
+// ─── global flags: help / version / fields / ndjson ─────────────────────────
+
+describe('global flags: help & version', () => {
+  it('--help / -h / help print the usage text (exit 0)', async () => {
+    const vault = makeVault()
+    for (const argv of [['--help'], ['-h'], ['help']]) {
+      const r = await run(vault, argv)
+      expect(r.exitCode, `${argv[0]} exits 0`).toBe(0)
+      expect(r.stdout).toContain('pm — agent-first CLI')
+      expect(r.stdout).toContain('EXIT CODES')
+    }
+  })
+
+  it('--version / -V print the pinned version (exit 0)', async () => {
+    const vault = makeVault()
+    for (const argv of [['--version'], ['-V']]) {
+      const r = await run(vault, argv)
+      expect(r.exitCode).toBe(0)
+      expect(r.stdout).toBe('pm 1.8.0')
+    }
+  })
+})
+
+describe('global flags: --fields', () => {
+  it('trims the payload — the json-mode stdout measurably loses fields', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const full = await run(vault, ['show', fx.prose, '--json'])
+    const trimmed = await run(vault, ['show', fx.prose, '--fields', 'id,title', '--json'])
+    expect(full.stdout).toContain('"status"')
+    expect(trimmed.stdout, '--fields drops fields from the rendered json stdout').not.toContain('"status"')
+    expect(trimmed.stdout).toContain('"id"')
+    expect(trimmed.stdout).toContain('"title"')
+    expect(trimmed.stdout.length, 'the byte count measurably shrinks').toBeLessThan(full.stdout.length)
+  })
+})
+
+describe('global flags: --ndjson', () => {
+  it('streams a header line then one machineRecord object per row', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['open', '--ndjson'])
+    expect(r.exitCode).toBe(0)
+    const lines = r.stdout.split('\n').filter(Boolean)
+    const header = JSON.parse(lines[0]!) as { kind: string; format: string; count: number }
+    expect(header.kind, 'the first line is the header object').toBe('header')
+    expect(header.format).toBe('lineage')
+    // Every subsequent line is a JSON object carrying the fixed machineRecord keys.
+    for (const l of lines.slice(1)) {
+      const obj = JSON.parse(l) as Record<string, unknown>
+      for (const key of PORCELAIN_COLUMNS) expect(obj, `ndjson row carries ${key}`).toHaveProperty(key)
+    }
+    // The blocked dependent's row is faithful — blocked_by names its blocker.
+    const qaRow = lines.slice(1).map((l) => JSON.parse(l) as Record<string, unknown>).find((o) => o.id === fx.qa)
+    expect(qaRow?.blocked_by).toBe(fx.schema)
+  })
+})
+
+// ─── mutation flags: --quiet / --explain ────────────────────────────────────
+
+describe('mutation flags: --quiet & --explain', () => {
+  it('a cascading mutation shows ⚠ by default, and --quiet suppresses it', async () => {
+    const control = makeVault()
+    const fxC = await seed(control)
+    const c = await run(control, ['set', fxC.schema, 'due=2026-07-30'])
+    expect((c.stdout.match(/⚠/g) ?? []).length, 'the cascade warning appears by default').toBeGreaterThan(0)
+
+    const quiet = makeVault()
+    const fxQ = await seed(quiet)
+    const q = await run(quiet, ['set', fxQ.schema, 'due=2026-07-30', '--quiet'])
+    expect(q.exitCode).toBe(0)
+    expect((q.stdout.match(/⚠/g) ?? []).length, '--quiet suppresses the ⚠ line').toBe(0)
+  })
+
+  it('--explain adds an explain: line to the confirmation', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['set', fx.schema, 'due=2026-07-30', '--explain'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('explain:')
+  })
+})
+
+// ─── tree extra flags: --all / --depth / --rich / --include-archived ─────────
+
+describe('tree extra flags', () => {
+  it('--all renders the composed subtree section', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['tree', fx.milestone, '--all'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('subtasks:')
+    expect(lineWithId(r.stdout, fx.prose)).toBeDefined()
+  })
+
+  it('--depth N bounds the rendered subtree depth', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Deep', '--dir', 'Work']))
+    const a = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'A']))
+    const b = idOf(await run(vault, ['new', 'task', '--project', proj, '--parent', a, '--title', 'B']))
+    const c = idOf(await run(vault, ['new', 'task', '--project', proj, '--parent', b, '--title', 'C']))
+    const shallow = await run(vault, ['tree', a, '--sub', '--depth', '1'])
+    expect(lineWithId(shallow.stdout, b), 'depth 1 shows the direct child').toBeDefined()
+    expect(lineWithId(shallow.stdout, c), 'depth 1 hides the grandchild').toBeUndefined()
+    const deep = await run(vault, ['tree', a, '--sub', '--depth', '2'])
+    expect(lineWithId(deep.stdout, c), 'depth 2 reveals the grandchild').toBeDefined()
+  })
+
+  it('--rich adds priority/assignee tokens that are absent without it', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Rich', '--dir', 'Work']))
+    const t = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'Rich task', '--priority', 'high', '--assignee', 'alice']))
+    const rich = await run(vault, ['tree', proj, '--sub', '--rich'])
+    expect(lineWithId(rich.stdout, t)).toContain('!high')
+    expect(lineWithId(rich.stdout, t)).toContain('@alice')
+    const plain = await run(vault, ['tree', proj, '--sub'])
+    expect(lineWithId(plain.stdout, t), 'without --rich the tokens are hidden').not.toContain('@alice')
+  })
+
+  it('--include-archived (via find, which honors it) toggles archived visibility', async () => {
+    // NOTE: `find` is the query view that honors --include-archived (it filters
+    // archived by default). `tree` does NOT filter archived — see the discrepancy
+    // note in docs/cli-ledger.md. This pins the flag on the surface that respects it.
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Arch', '--dir', 'Work']))
+    const t = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'Archive me']))
+    await run(vault, ['archive', t])
+    const def = await run(vault, ['find', '--project', proj])
+    expect(def.stdout, 'archived tasks are hidden by default').not.toContain(t)
+    const inc = await run(vault, ['find', '--project', proj, '--include-archived'])
+    expect(inc.stdout, '--include-archived reveals them').toContain(t)
+  })
+})
+
+// ─── show / next / agenda / log ─────────────────────────────────────────────
+
+describe('render: show', () => {
+  it('renders the title line, key fields, and the note body', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['show', fx.prose])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain(`[${fx.prose}]`)
+    expect(r.stdout).toContain('Wire order API')
+    expect(r.stdout).toMatch(/status:/)
+    expect(r.stdout, 'the note body is included').toContain('Real API notes an agent should read.')
+  })
+})
+
+describe('render: next', () => {
+  it('lists the actionable frontier and excludes blocked work', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['next'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.trimEnd()).toMatch(/\d+ actionable now$/)
+    expect(lineWithId(r.stdout, fx.qa), 'the blocked task is NOT actionable').toBeUndefined()
+    expect(lineWithId(r.stdout, fx.schema), 'the unblocked predecessor IS actionable').toBeDefined()
+  })
+})
+
+describe('render: agenda', () => {
+  it('a single date lists only work due that day', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['agenda', '2026-07-20'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('agenda 2026-07-20')
+    expect(lineWithId(r.stdout, fx.milestone), 'the milestone due 07-20 is listed').toBeDefined()
+    expect(lineWithId(r.stdout, fx.flyer), 'work due 07-16 is NOT in the 07-20 agenda').toBeUndefined()
+  })
+
+  it('this-week renders the Mon..Sun range header', async () => {
+    const vault = makeVault()
+    await seed(vault)
+    const r = await run(vault, ['agenda', 'this-week'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('agenda 2026-07-13..2026-07-19')
+  })
+})
+
+describe('render: log', () => {
+  it('renders a recent-change table', async () => {
+    const vault = makeVault()
+    await seed(vault)
+    const r = await run(vault, ['log'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.split('\n')[0]).toMatch(/^updated\s+id\s+status\s+title/)
+    expect(r.stdout.trimEnd()).toMatch(/recently changed$/)
+    expect(r.stdout).toContain('QA pass')
+  })
+})
+
+// ─── analysis: rollup / validate / blockers / graph / critical-path ─────────
+
+describe('render: rollup', () => {
+  it('--group-by status | priority | assignee each render an aggregate table', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const byStatus = await run(vault, ['rollup', fx.projA, '--group-by', 'status'])
+    expect(byStatus.stdout.split('\n')[0]).toMatch(/^status\s+count\s+done\s+pct\s+overdue\s+est/)
+    expect(byStatus.stdout.trimEnd()).toMatch(/by status$/)
+
+    const byPriority = await run(vault, ['rollup', fx.projA, '--group-by', 'priority'])
+    expect(byPriority.stdout.trimEnd()).toMatch(/by priority$/)
+
+    const byAssignee = await run(vault, ['rollup', fx.projA, '--group-by', 'assignee'])
+    expect(byAssignee.stdout).toContain('(unassigned)')
+    expect(byAssignee.stdout.trimEnd()).toMatch(/by assignee$/)
+  })
+})
+
+describe('render: validate', () => {
+  it('reports clean, then surfaces a dangling dependency, then flags the --fix write', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const clean = await run(vault, ['validate', fx.projA])
+    expect(clean.stdout).toContain('no findings — clean')
+
+    // Introduce a dangling dependency and re-validate.
+    await run(vault, ['set', fx.logo, 'dependencies=ghost-id'])
+    const dirty = await run(vault, ['validate', fx.projA])
+    expect(dirty.stdout).toContain('dangling-dependency')
+    expect(dirty.stdout.trimEnd()).toMatch(/\d+ finding/)
+
+    const fixed = await run(vault, ['validate', fx.projA, '--fix'])
+    expect(fixed.stdout).toContain('self-heal written')
+  })
+})
+
+describe('render: blockers', () => {
+  it('ranks tasks by how much they block', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['blockers', fx.projA])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain(fx.schema)
+    expect(r.stdout.trimEnd()).toMatch(/\d+ blocking task/)
+  })
+})
+
+describe('render: graph', () => {
+  it('default renders the edge table; --dot renders a Graphviz document', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const table = await run(vault, ['graph', fx.projA])
+    expect(table.exitCode).toBe(0)
+    expect(table.stdout).toContain('QA pass → DB schema')
+    expect(table.stdout.trimEnd()).toMatch(/\d+ nodes? · \d+ edges?$/)
+
+    const dot = await run(vault, ['graph', fx.projA, '--dot'])
+    expect(dot.stdout).toContain('digraph "Fiverr Machine" {')
+    expect(dot.stdout).toContain(`"${fx.qa}" -> "${fx.schema}"`)
+  })
+})
+
+describe('render: critical-path', () => {
+  it('renders the longest dependency chain with a header + duration footer', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['critical-path', fx.projA])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('critical path (Fiverr Machine)')
+    expect(r.stdout.trimEnd()).toMatch(/\d+ tasks? · \d+ days? total$/)
+  })
+})
+
+// ─── create: --after/--before, field flags, import ──────────────────────────
+
+describe('create: --after / --before resequencing', () => {
+  it('--after places the new sibling between its anchor and the next sibling', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Seq', '--dir', 'Work']))
+    const a = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'AA']))
+    const b = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'BB']))
+    const c = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'CC', '--after', a]))
+    const tree = await run(vault, ['tree', proj, '--sub'])
+    const idx = (id: string) => tree.stdout.indexOf(`[${id}]`)
+    expect(idx(a)).toBeLessThan(idx(c))
+    expect(idx(c), 'CC lands after AA and before BB').toBeLessThan(idx(b))
+  })
+})
+
+describe('create: field flags land on disk (verified through show)', () => {
+  it('task flags (priority/due/start/assignee/tag/estimate/desc) all persist', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Flags', '--dir', 'Work']))
+    const t = idOf(
+      await run(vault, [
+        'new', 'task', '--project', proj, '--title', 'Loaded',
+        '--priority', 'high', '--due', '2026-07-25', '--start', '2026-07-20',
+        '--assignee', 'alice', '--tag', 'urgent', '--estimate', '5', '--desc', 'Read me carefully'
+      ])
+    )
+    const plain = await run(vault, ['show', t])
+    expect(plain.stdout).toContain('priority: high')
+    expect(plain.stdout).toContain('due: 2026-07-25')
+    expect(plain.stdout).toContain('start: 2026-07-20')
+    expect(plain.stdout).toContain('assignees: alice')
+    expect(plain.stdout).toContain('tags: urgent')
+    expect(plain.stdout, 'the desc becomes the note body').toContain('Read me carefully')
+    // timeEstimate is not in the plain field list → assert it via the json surface.
+    const json = await run(vault, ['show', t, '--json'])
+    expect((JSON.parse(json.stdout) as { data: { timeEstimate: number } }).data.timeEstimate).toBe(5)
+  })
+
+  it('project flags (icon/color/desc) persist', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Styled', '--dir', 'Work', '--icon', '📌', '--color', '#abcdef', '--desc', 'Project overview']))
+    const json = await run(vault, ['show', proj, '--json'])
+    const data = (JSON.parse(json.stdout) as { data: { icon: string; color: string; description: string } }).data
+    expect(data.icon).toBe('📌')
+    expect(data.color).toBe('#abcdef')
+    expect(data.description).toBe('Project overview')
+  })
+})
+
+describe('create: import', () => {
+  it('converts an existing note into a task under the project', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Inbox', '--dir', 'Work']))
+    writeFileSync(join(vault, 'loose.md'), '---\ntitle: Loose\n---\nsome prose\n')
+    const r = await run(vault, ['import', 'loose.md', '--into', proj])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('✓ import')
+    const tree = await run(vault, ['tree', proj, '--sub'])
+    expect(tree.stdout, 'the imported note is now a task in the tree').toContain('loose')
+  })
+})
+
+// ─── update: sugar / rename / reorder / archive / dup / rm ───────────────────
+
+describe('update: sugar verbs', () => {
+  it('status/due/priority/assign each confirm and take effect', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    expect((await run(vault, ['status', fx.logo, 'done'])).stdout).toContain('✓ status')
+    // A now-done overdue item drops out of `overdue`.
+    expect(lineWithId((await run(vault, ['overdue'])).stdout, fx.logo)).toBeUndefined()
+
+    expect((await run(vault, ['priority', fx.schema, 'high'])).stdout).toContain('✓ priority')
+    expect((await run(vault, ['due', fx.schema, '2026-08-01'])).stdout).toContain('✓ due')
+    const assigned = await run(vault, ['assign', fx.schema, 'alice'])
+    expect(assigned.stdout).toContain('✓ assign')
+    expect((await run(vault, ['show', fx.schema])).stdout, 'assign took effect').toContain('assignees: alice')
+  })
+})
+
+describe('update: rename (bidirectional)', () => {
+  it('renames a task and a project, reflected in tree/projects', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    expect((await run(vault, ['rename', fx.schema, '--title', 'DB schema v2'])).exitCode).toBe(0)
+    expect((await run(vault, ['tree', fx.projA, '--sub'])).stdout).toContain('DB schema v2')
+
+    expect((await run(vault, ['rename', fx.projA, '--title', 'Fiverr v2'])).exitCode).toBe(0)
+    expect((await run(vault, ['projects'])).stdout).toContain('Fiverr v2')
+  })
+})
+
+describe('update: reorder', () => {
+  it('resequences a sibling before another', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Ord', '--dir', 'Work']))
+    const a = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'AA']))
+    const b = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'BB']))
+    const c = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'CC']))
+    void b
+    await run(vault, ['reorder', c, '--before', a])
+    const tree = await run(vault, ['tree', proj, '--sub'])
+    expect(tree.stdout.indexOf(`[${c}]`), 'CC now precedes AA').toBeLessThan(tree.stdout.indexOf(`[${a}]`))
+  })
+})
+
+describe('update: archive / unarchive', () => {
+  it('archive hides a task from the default query view; unarchive restores it', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Arc', '--dir', 'Work']))
+    const t = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'Temp']))
+    expect((await run(vault, ['archive', t])).stdout).toContain('✓ archive')
+    expect((await run(vault, ['find', '--project', proj])).stdout).not.toContain(t)
+    expect((await run(vault, ['unarchive', t])).stdout).toContain('✓ unarchive')
+    expect((await run(vault, ['find', '--project', proj])).stdout, 'unarchive brings it back').toContain(t)
+  })
+})
+
+describe('update: dup', () => {
+  it('duplicates a task (with its subtree) and confirms the new id', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const r = await run(vault, ['dup', fx.milestone, '--with-subtasks'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('✓ dup')
+    const newId = (r.envelope.changed_ids ?? [])[0] ?? ''
+    expect(r.stdout, 'the confirmation anchors the new id').toContain(`[${newId}]`)
+  })
+})
+
+describe('update: rm', () => {
+  it('trashes a task (gone from tree) and a project (gone from projects)', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Trashy', '--dir', 'Work']))
+    const t = idOf(await run(vault, ['new', 'task', '--project', proj, '--title', 'Doomed']))
+    expect((await run(vault, ['rm', t])).stdout).toContain('✓ rm')
+    expect((await run(vault, ['tree', proj, '--sub'])).stdout).not.toContain(`[${t}]`)
+
+    expect((await run(vault, ['rm', proj, '--project'])).exitCode).toBe(0)
+    expect((await run(vault, ['projects'])).stdout).not.toContain('Trashy')
+  })
+})
+
+// ─── declarative: reconcile / export / snapshot+restore / batch / watch ─────
+
+describe('declarative: reconcile', () => {
+  it('runs idempotently over a healthy vault (exit 0, ✓ confirmation)', async () => {
+    const vault = makeVault()
+    await seed(vault)
+    const r = await run(vault, ['reconcile'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('✓ reconcile')
+  })
+})
+
+describe('declarative: export round-trips into apply', () => {
+  it('export emits a spec that apply recreates in a fresh vault', async () => {
+    const src = makeVault()
+    const fx = await seed(src)
+    const exported = await run(src, ['export', fx.projA])
+    expect(exported.exitCode).toBe(0)
+    const doc = JSON.parse(exported.stdout) as { project: { title: string } }
+    expect(doc.project.title).toBe('Fiverr Machine')
+
+    const dst = makeVault()
+    const specPath = join(dst, 'exported.json')
+    writeFileSync(specPath, exported.stdout)
+    const applied = await run(dst, ['apply', specPath])
+    expect(applied.exitCode).toBe(0)
+    expect((await run(dst, ['projects'])).stdout, 'the exported project round-trips').toContain('Fiverr Machine')
+  })
+})
+
+describe('declarative: snapshot / restore', () => {
+  it('snapshot serializes the vault; restore rebuilds it elsewhere', async () => {
+    const src = makeVault()
+    await seed(src)
+    const snap = await run(src, ['snapshot'])
+    expect(snap.exitCode).toBe(0)
+    const doc = JSON.parse(snap.stdout) as { projects: unknown[] }
+    expect(doc.projects.length).toBe(2)
+
+    const dst = makeVault()
+    const snapPath = join(dst, 'snap.json')
+    writeFileSync(snapPath, snap.stdout)
+    const restored = await run(dst, ['restore', snapPath])
+    expect(restored.exitCode).toBe(0)
+    expect(restored.stdout).toMatch(/restored 2 projects/)
+    const projects = await run(dst, ['projects'])
+    expect(projects.stdout).toContain('Fiverr Machine')
+    expect(projects.stdout).toContain('Community Garden')
+  })
+})
+
+describe('declarative: batch success path', () => {
+  it('applies a valid op stream atomically and confirms the changed ids', async () => {
+    const vault = makeVault()
+    const proj = idOf(await run(vault, ['new', 'project', '--title', 'Batch', '--dir', 'Work']))
+    const stream = [
+      JSON.stringify({ op: 'new_task', project: proj, title: 'From batch A', key: 'a' }),
+      JSON.stringify({ op: 'new_task', project: proj, title: 'From batch B', key: 'b', under: 'a' })
+    ].join('\n')
+    const r = await withStdin(stream, () => run(vault, ['batch']))
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('✓ batch')
+    // Rendered proof: both created tasks are now in the tree, nested per `under`.
+    const tree = await run(vault, ['tree', proj, '--sub'])
+    expect(tree.stdout).toContain('From batch A')
+    expect(tree.stdout).toContain('From batch B')
+  })
+})
+
+describe('declarative: watch (smoke)', () => {
+  it('starts and emits the initial ready event (fs watcher stubbed, no leak)', async () => {
+    const vault = makeVault()
+    await seed(vault)
+    const writes: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk))
+      return true
+    })
+    // `watch` never resolves — race it against a short timer, then restore.
+    void runPm(['watch'], { vault, now: NOW })
+    await new Promise((r) => setTimeout(r, 250))
+    spy.mockRestore()
+    expect(writes.join(''), 'watch emits a ready NDJSON event on setup').toContain('"kind":"ready"')
   })
 })

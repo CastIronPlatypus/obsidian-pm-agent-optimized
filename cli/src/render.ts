@@ -308,7 +308,7 @@ export async function buildTreeNodes(
   ctx: PmContext,
   project: Project,
   root: Task | null,
-  opts: { depth?: number; includeRoot?: boolean } = {}
+  opts: { depth?: number; includeRoot?: boolean; includeArchived?: boolean } = {}
 ): Promise<TreeNode[]> {
   const maxDepth = opts.depth ?? Infinity
   const flat = root
@@ -323,6 +323,7 @@ export async function buildTreeNodes(
   const nodes: TreeNode[] = []
   for (const f of flat) {
     if (f.depth > maxDepth) continue
+    if (f.task.archived && !opts.includeArchived) continue
     const lines = await contentLinesOf(ctx, f.task)
     nodes.push({
       id: f.task.id,

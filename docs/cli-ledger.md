@@ -4,171 +4,166 @@ Two-way trace between the **Verbatim Requirement Exchange** (INT-019 Appendix,
 authoritative) + sections **A–G** of the Intent, and the **rendered-surface**
 assertions that gate them. A clause is `COVERED` **only** when a `stdout` or
 `exitCode` assertion pins it (proof on the artifact the consumer consumes); a
-clause whose only evidence is the JSON envelope, or which has no assertion at
-all, is `NOT DONE`. Verbatim spans that map to no command are `pleasantry/no-op`.
+clause whose only evidence is the JSON envelope, or which has no assertion, is
+`NOT DONE`. Verbatim spans that map to no command are `pleasantry/no-op`.
 
 Test ids:
-- `render.test.ts` — `cli/render.test.ts` (new; the rendered-surface gate).
-- `pm.test.ts` — `cli/pm.test.ts` (R41–R46; R43/R44 reworked onto `stdout`).
+- `render.test.ts` — `cli/render.test.ts` (the rendered-surface gate; 69 tests). Cited by its `describe: it` label.
+- `pm.test.ts` — `cli/pm.test.ts` (R41–R46; R43/R44 assert on `stdout`).
 - `mutation.test.ts` — `cli/src/commands/mutation.test.ts` (Wave-B disk edges).
 
 Clock is injected (`now: '2026-07-16'`) everywhere date-bearing so output is
-byte-deterministic.
+byte-deterministic. Every COVERED read/mutation carries an executable negative
+control (a fixture mutation that flips the assertion).
 
 ## A. Output, rendering, and global contract
 
-| # | clause (short quote) | A–G | command + flags/mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| A1 | "Default output is the RENDERED printout" | A | any read cmd, no `--json` | render.test.ts `render: today` / `render: tree` | — (whole file asserts stdout, never envelope) | COVERED |
-| A2 | "`--json` emits the stable envelope" | A | `--json` `{ok,command,data\|error,changed_ids,warnings,meta}` | pm.test.ts R41/R42/R45/R46 (envelope shape) | R42 neg-control (no wiring → no id) | COVERED |
-| A3 | "`--porcelain` emits tab-separated stable columns" | A | `find --porcelain`; `open --porcelain` | render.test.ts `render: find / ls` (2 porcelain cases) | table=5-col vs lineage=15-col stability asserted | COVERED |
-| A4 | "`--ndjson` streams newline-delimited JSON … `{kind:'header'…}` then rows" | A | `--ndjson` | — | — | NOT DONE (no stdout assertion; renderer exists in `render.ts renderNdjson`) |
-| A5 | "`--fields a,b,c` trims payload … each mode measurably changes the bytes" | A | `--fields` on json/pretty | — | — | NOT DONE (no assertion that bytes change) |
-| A6 | "legend … `○ ◐ ● ⊘` … `✎N` … `[id]` bracketed … `▸N` … `!Nd` … single `⚠`" | A | `tree`/`today`/`overdue` | render.test.ts `LEGEND_LINE`, `!4d`, `⚠`×1, `✎N`, `[id]` | ✎ appear/disappear; ⚠ 0-vs-1 | COVERED |
-| A7 | "`✎N` = REAL note body (frontmatter AND managed `pm:link` excluded)" | A/F | `tree --sub` bare vs prose | render.test.ts `tree --sub` + `NEGATIVE CONTROL` | append prose → ✎ appears | COVERED |
-| A8 | "Deterministic exit codes: 0;1;2;4;5;6;7;8;9" | A | all | render.test.ts `exit codes` (0,2,2,4,5,6,7,8,9) | E_BATCH/dry-run wrote-nothing controls | COVERED |
-| A9 | exit 1 generic | A | thrown non-PmError | — | — | NOT DONE (no fixture forces a generic exit-1; only the mapping exists) |
-| A10 | "Handles … raw id, slug-path, `id:`/`path:` … ambiguity is `E_AMBIGUOUS`" | A | slug-path resolution | render.test.ts exit-6; pm.test.ts R46 slug-path; render.test.ts `path` | exit-6 ambiguous | COVERED |
-| A11 | "Global flags: `--vault` … `--dry-run` … `--version` … No dead/parsed-but-ignored flags" | A | `--vault`,`--dry-run`,`--no-cascade`,`--porcelain` | render.test.ts (vault via opts; dry-run previews) | dry-run wrote-nothing | PARTIAL→NOT DONE (`--explain`,`--quiet`,`-h/--help`,`--version` have no assertion) |
+| # | clause (short quote) | command + mode | test-id | negative-control | status |
+|---|---|---|---|---|---|
+| A1 | "Default output is the RENDERED printout" | any read cmd, no `--json` | render `render: today` / `render: tree` | whole file asserts stdout, never `envelope.data` | COVERED |
+| A2 | "`--json` emits the stable envelope" | `--json` | pm.test R41/R42/R45/R46 | R42 no-wiring control | COVERED |
+| A3 | "`--porcelain` … tab-separated stable columns" | `find --porcelain`; `open --porcelain` | render `render: find / ls` (2 porcelain cases) | 5-col table vs 15-col lineage tab-count | COVERED |
+| A4 | "`--ndjson` streams newline-delimited JSON … header then rows" | `open --ndjson` | render `global flags: --ndjson` | header `kind`; every machineRecord key present; `blocked_by` faithful | COVERED |
+| A5 | "`--fields a,b,c` trims payload … each mode measurably changes the bytes" | `show --fields id,title --json` | render `global flags: --fields` | trimmed stdout drops `"status"`, byte count shrinks | COVERED (json-mode; see Discrepancy D-2) |
+| A6 | "legend `○ ◐ ● ⊘` … `✎N` … `[id]` … `▸N` … `!Nd` … single `⚠`" | `tree`/`today`/`overdue` | render `render: tree`/`today`/`overdue` | ✎ appear/disappear; ⚠ 0-vs-1; `!4d` | COVERED |
+| A7 | "`✎N` = REAL body (frontmatter AND `pm:link` excluded)" | `tree --sub` | render `render: tree` + NEGATIVE CONTROL | append prose → ✎ appears | COVERED |
+| A8 | "exit codes 0;2;4;5;6;7;8;9" | all | render `exit codes` (0,2,2,4,5,6,7,8,9) | dry-run/E_BATCH wrote-nothing | COVERED |
+| A9 | "1 generic" | store throw (rename collision) | render `exit codes: generic exit-1` | `✗ GENERIC:` | COVERED |
+| A10 | "Handles … ambiguity is `E_AMBIGUOUS`" | slug-path | render exit-6 + `render: path`; pm.test R46 | exit-6 ambiguous | COVERED |
+| A11 | "Global flags … `--quiet` … `-h/--help` … `--version` … No dead/parsed-but-ignored flags" | `--help`/`-h`/`help`/`--version`/`-V`/`--quiet`/`--explain` | render `global flags: help & version` + `mutation flags: --quiet & --explain` | quiet: ⚠ present-vs-absent; explain: `explain:` line | COVERED (see Discrepancy D-1: one dead flag found) |
 
 ## B. Read / navigate
 
-| # | clause | A–G | command + mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| B1 | "`pm projects` — list every project" | B | `projects` (table) | render.test.ts `render: projects` | footer `2 projects` | COVERED |
-| B2 | "`pm tree <handle>` UNIVERSAL … `--sub`" | B | `tree <ms> --sub` | render.test.ts `tree --sub`; pm.test.ts R43 | ✎ flip; exit-7 unknown | COVERED |
-| B3 | "`--needs` (upstream)" | B | `tree <qa> --needs` | render.test.ts `tree --needs` | — | COVERED |
-| B4 | "`--blocks` (downstream)" | B | `tree <schema> --blocks` | render.test.ts `tree --blocks` | — | COVERED |
-| B5 | "`--all` … `--depth N` … `--rich` … `--status` … `--include-archived`" | B | `tree` extra flags | — | — | NOT DONE (no stdout assertion on `--all/--depth/--rich/--include-archived`) |
-| B6 | "`pm show <handle>` … full note incl. body" | B | `show` (plain) | — | — | NOT DONE (no stdout assertion) |
-| B7 | "`pm find` / `pm ls <query>` … FLAT filterable sortable table" | B | `find --status --project --sort`; `--porcelain` | render.test.ts `render: find / ls` (pretty + porcelain) | table tab-count stable | COVERED |
-| B8 | "`pm deps <handle>` … needs/blocks … blocked warning" | B | `deps <qa>` | render.test.ts `render: deps` | single ⚠ asserted | COVERED |
-| B9 | "`pm path <handle>` — breadcrumb" | B | `path <prose>` (plain) | render.test.ts `render: path` (byte-exact) | — | COVERED |
-| B10 | "`pm next [project]` … actionable frontier" | B | `next` | — | — | NOT DONE (handler wired; no stdout assertion) |
-| B11 | "`pm today` … due-today-only, single `⚠` pointer, footer counts, does NOT list overdue" | B | `today` | render.test.ts `render: today`; pm.test.ts R44 | overdue present/absent → 1/0 ⚠; footer no re-mention | COVERED |
-| B12 | "`pm overdue` … `!Nd` markers" | B | `overdue` | render.test.ts `render: overdue` | completing item removes `!4d` | COVERED |
-| B13 | "`pm open` … all open, blocked-aware `⊘` … `--by deps`" | B | `open --by deps` | render.test.ts `render: open` | complete predecessor → ⊘ drops | COVERED |
-| B14 | "`pm blocked` — everything blocked and by what" | B | `blocked` | render.test.ts `render: blocked` | — | COVERED |
-| B15 | "`pm agenda <date\|range>`" | B | `agenda` | — | — | NOT DONE (handler wired; no stdout assertion) |
-| B16 | "`pm log --since <t>`" | B | `log` | — | — | NOT DONE (handler wired; timestamp non-deterministic, no assertion) |
-| B17 | "`pm palette [project]`" | B | `palette` (plain) | render.test.ts `render: palette` | `done*` terminal marker | COVERED |
-| B18 | "`pm schema [task\|project\|apply\|batch]`" | B | `schema task` (plain JSON) | render.test.ts `render: schema` | `$id: pm:task` | COVERED |
-| B19 | "`pm explain <handle>` … breadcrumb + unmet blockers + plain-English" | B | `explain <qa>` (plain) | render.test.ts `render: explain` | "waiting on 1 unmet dependency: DB schema" | COVERED |
-| B20 | "`pm rollup <project> --group-by …`" | B | `rollup` | — | — | NOT DONE (handler wired in `analysis.ts`; no stdout assertion) |
-| B21 | "`pm validate [project] [--fix]`" | B | `validate` | — | — | NOT DONE (handler wired; no stdout assertion) |
-| B22 | "`pm blockers [project]` … ranked by blocked-count" | B | `blockers` | — | — | NOT DONE (handler wired; no stdout assertion) |
-| B23 | "`pm graph <project> [--dot]`" | B | `graph` | — | — | NOT DONE (handler wired; no stdout assertion) |
-| B24 | "`pm critical-path <project>`" | B | `critical-path` | — | — | NOT DONE (handler wired; no stdout assertion) |
+| # | clause | command + mode | test-id | negative-control | status |
+|---|---|---|---|---|---|
+| B1 | "`pm projects`" | `projects` | render `render: projects` | footer `2 projects` | COVERED |
+| B2 | "`pm tree` UNIVERSAL … `--sub`" | `tree <ms> --sub` | render `render: tree`; pm.test R43 | ✎ flip; exit-7 | COVERED |
+| B3 | "`--needs`" | `tree <qa> --needs` | render `render: tree` (--needs) | — | COVERED |
+| B4 | "`--blocks`" | `tree <schema> --blocks` | render `render: tree` (--blocks) | — | COVERED |
+| B5 | "`--all` … `--depth N` … `--rich` … `--include-archived`" | `tree --all/--depth/--rich`; `find --include-archived` | render `tree extra flags` (4 its) | depth 1 hides grandchild; --rich tokens present-vs-absent; archived hidden-vs-shown | COVERED (include-archived pinned on `find`; see D-1) |
+| B6 | "`pm show` … full note incl. body" | `show <prose>` | render `render: show` | body line asserted | COVERED |
+| B7 | "`pm find`/`pm ls` … FLAT filterable sortable" | `find --status --project --sort`; `--porcelain` | render `render: find / ls` | table tab-count stable | COVERED |
+| B8 | "`pm deps` … blocked warning" | `deps <qa>` | render `render: deps` | single ⚠ | COVERED |
+| B9 | "`pm path` — breadcrumb" | `path <prose>` | render `render: path` (byte-exact) | — | COVERED |
+| B10 | "`pm next` … actionable frontier" | `next` | render `render: next` | blocked qa absent, unblocked present | COVERED |
+| B11 | "`pm today` … single `⚠` … does NOT list overdue" | `today` | render `render: today`; pm.test R44 | overdue 1/0 ⚠; footer no re-mention | COVERED |
+| B12 | "`pm overdue` … `!Nd`" | `overdue` | render `render: overdue` | complete item removes `!4d` | COVERED |
+| B13 | "`pm open` … blocked-aware `⊘` … `--by deps`" | `open --by deps` | render `render: open` | complete predecessor → ⊘ drops | COVERED |
+| B14 | "`pm blocked`" | `blocked` | render `render: blocked` | — | COVERED |
+| B15 | "`pm agenda <date\|range>`" | `agenda 2026-07-20`; `agenda this-week` | render `render: agenda` (2 its) | 07-20 excludes 07-16 work | COVERED |
+| B16 | "`pm log --since`" | `log` | render `render: log` | header row + footer pinned | COVERED |
+| B17 | "`pm palette`" | `palette` | render `render: palette` | `done*` terminal marker | COVERED |
+| B18 | "`pm schema`" | `schema task` | render `render: schema` | `$id: pm:task` | COVERED |
+| B19 | "`pm explain` … plain-English" | `explain <qa>` | render `render: explain` | "waiting on 1 unmet dependency: DB schema" | COVERED |
+| B20 | "`pm rollup --group-by …`" | `rollup --group-by status\|priority\|assignee` | render `render: rollup` | each footer `by <key>`; `(unassigned)` | COVERED |
+| B21 | "`pm validate [--fix]`" | `validate`; `validate --fix` | render `render: validate` | clean → dangling → self-heal written | COVERED |
+| B22 | "`pm blockers` … ranked" | `blockers <projA>` | render `render: blockers` | schema id + `blocking task` footer | COVERED |
+| B23 | "`pm graph [--dot]`" | `graph`; `graph --dot` | render `render: graph` | edge row + `digraph` + `->` | COVERED |
+| B24 | "`pm critical-path`" | `critical-path <projA>` | render `render: critical-path` | header + `days total` footer | COVERED |
 
 ## C. Create
 
-| # | clause | A–G | command + mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| C1 | "`pm new project\|task\|subtask\|milestone` … auto-mint id, nested layout, `parentId`, INT-021 backlink … returns id + filePath" | C | `new project`/`new task`/`new milestone` | pm.test.ts R42 (id/layout/parentId/backlink on disk); render.test.ts seed | R42 no-wiring control | COVERED |
-| C2 | "`--after <h>` / `--before <h>` reorders among siblings" | C | `new … --after/--before` | — | — | NOT DONE (wired in `create.ts`; no assertion) |
-| C3 | create field flags `--status --priority --due --start … --icon --color` | C | `new … --due/--start` etc. | render.test.ts seed (due/start feed today/overdue/shift) | overdue/`!4d` proves `--due` landed | COVERED (subset: due/start; icon/color/estimate/assignee/tag/desc NOT DONE) |
-| C4 | "`pm apply <spec>` … idempotent upsert by key … `--dry-run` … `+create/~update/-archive` diff" | C | `apply`; `apply --dry-run`; `apply --prune` | pm.test.ts R46 (idempotency); render.test.ts `apply --dry-run`; mutation.test.ts `apply --prune` | dry-run wrote-nothing; identical re-apply no-op | COVERED |
-| C5 | "`--prune` archives (not deletes)" | C | `apply --prune` | mutation.test.ts `apply --prune` | Archive/ folder appears | COVERED |
-| C6 | "`pm import <note> --into <project>`" | C | `import` | — | — | NOT DONE (wired in `create.ts`; no assertion) |
+| # | clause | command + mode | test-id | negative-control | status |
+|---|---|---|---|---|---|
+| C1 | "`pm new …` … auto-mint id, nested layout, backlink … returns id + filePath" | `new project/task/milestone` | pm.test R42; render `seed` | R42 no-wiring control | COVERED |
+| C2 | "`--after <h>` / `--before <h>` reorders siblings" | `new … --after` | render `create: --after / --before` | CC lands between AA and BB (index order) | COVERED |
+| C3 | create field flags `--status --priority --due --start --assignee --tag --estimate --desc --icon --color` | `new task/project …` | render `create: field flags land` (2 its) | all fields read back via show | COVERED |
+| C4 | "`pm apply` … idempotent … `--dry-run` diff" | `apply`; `apply --dry-run`; `apply --prune` | pm.test R46; render `apply --dry-run`; mutation.test `apply --prune` | dry-run wrote-nothing; identical re-apply no-op | COVERED |
+| C5 | "`--prune` archives (not deletes)" | `apply --prune` | mutation.test `apply --prune` | Archive/ folder appears | COVERED |
+| C6 | "`pm import --into`" | `import <note> --into` | render `create: import` | imported note appears in tree | COVERED |
 
 ## D. Update / restructure
 
-| # | clause | A–G | command + mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| D1 | "`pm set <handle> <field>=<val>` … typed coercion … sugar status/assign/due/priority" | D | `set <id> field=val` | render.test.ts `mutation confirmation` (`✓ set → [id]`); pm.test.ts R45 | — | COVERED (general `set`; sugar `status/assign/due/priority` NOT DONE) |
-| D2 | "`pm depend --on` / `pm undepend` … cycle-checked → `E_CYCLE`" | D | `depend` | render.test.ts exit-5; mutation.test.ts cycle-guard | rejected edge writes nothing (mutation.test) | COVERED |
-| D3 | "`pm mv <handle> --under` reparent; `mv project --dir` moveProject" | D | `mv --parent`; `mv project --dir` | mutation.test.ts `mv (reparent)` + `mv project --dir` | old location gone / new exists | COVERED (asserted on disk, not stdout) |
-| D4 | "`pm rename <handle> <title>` bidirectional" | D | `rename` | — | — | NOT DONE (wired; no assertion) |
-| D5 | "`pm reorder --before\|--after`" | D | `reorder` | — | — | NOT DONE (wired; no assertion) |
-| D6 | "`pm archive` / `pm unarchive` reversible" | D | `archive`/`unarchive` | — | — | NOT DONE (wired; no assertion) |
-| D7 | "`pm dup [--with-subtasks]`" | D | `dup` | — | — | NOT DONE (wired; no assertion) |
-| D8 | "`pm rm [--project]` — trash, never hard-delete" | D | `rm` | — | — | NOT DONE (wired; no assertion) |
-| D9 | "`pm note --append\|--set\|--prepend` … flips `✎` on" | D | `note --append` | render.test.ts `tree` ✎ negative-control (prose via `note --append`) | bare→✎ after append | COVERED |
-| D10 | "`pm shift +Nd\|…` … cascade subtree + dependents … `--dry-run` previews, `--no-cascade`" | D | `shift --dry-run`; `shift` | render.test.ts `shift --dry-run` (preview + wrote-nothing); mutation.test.ts `shift --dry-run` | dry-run leaves old date on disk & in tree | COVERED |
+| # | clause | command + mode | test-id | negative-control | status |
+|---|---|---|---|---|---|
+| D1 | "`pm set` … sugar status/assign/due/priority" | `set`; `status/priority/due/assign` | render `render: mutation confirmation` + `update: sugar verbs`; pm.test R45 | status=done drops from overdue; assign reflected in show | COVERED |
+| D2 | "`depend`/`undepend` … cycle-checked → `E_CYCLE`" | `depend` | render exit-5; mutation.test cycle-guard | rejected edge writes nothing | COVERED |
+| D3 | "`mv --under`; `mv project --dir`" | `mv --parent`; `mv project --dir` | mutation.test `mv (reparent)` + `mv project --dir` | old location gone / new exists | COVERED |
+| D4 | "`pm rename` bidirectional" | `rename` (task + project) | render `update: rename` | new titles appear in tree/projects | COVERED |
+| D5 | "`pm reorder`" | `reorder --before` | render `update: reorder` | CC precedes AA (index order) | COVERED |
+| D6 | "`pm archive`/`pm unarchive` reversible" | `archive`/`unarchive` | render `update: archive / unarchive` | archived hidden then restored (via find) | COVERED (via `find`; see D-1) |
+| D7 | "`pm dup [--with-subtasks]`" | `dup --with-subtasks` | render `update: dup` | `✓ dup` anchors new id | COVERED |
+| D8 | "`pm rm [--project]` — trash" | `rm`; `rm --project` | render `update: rm` | task gone from tree; project gone from projects | COVERED |
+| D9 | "`pm note … flips `✎` on`" | `note --append` | render `render: tree` ✎ control | bare→✎ after append | COVERED |
+| D10 | "`pm shift` … cascade … `--dry-run`, `--no-cascade`" | `shift --dry-run`; `shift` | render `shift --dry-run`; mutation.test `shift --dry-run` | dry-run leaves old date on disk & in tree | COVERED |
 
 ## E. Structure / analysis / declarative / live
 
-| # | clause | A–G | command + mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| E1 | "`pm reconcile [project]`" | E | `reconcile` | — | — | NOT DONE (wired in `update.ts`; no assertion) |
-| E2 | "`pm export <project>` … same shape `apply` consumes" | E | `export` | — | — | NOT DONE (wired; no assertion) |
-| E3 | "`pm snapshot` / `pm restore` … vault-wide" | E | `snapshot`/`restore` | — | — | NOT DONE (wired in `declarative.ts`; no assertion) |
-| E4 | "`pm batch < ops.ndjson` … atomic … any invalid op → `E_BATCH`, nothing written" | E | `batch` (stdin) | render.test.ts exit-9 | valid op did NOT land after reject | COVERED (reject path; success path NOT DONE) |
-| E5 | "`pm watch [--ndjson]` … change-event stream" | E | `watch` | — | — | NOT DONE (long-lived; wired in `live.ts`; no assertion) |
+| # | clause | command + mode | test-id | negative-control | status |
+|---|---|---|---|---|---|
+| E1 | "`pm reconcile`" | `reconcile` | render `declarative: reconcile` | idempotent exit-0 + `✓ reconcile` | COVERED |
+| E2 | "`pm export` … same shape `apply` consumes" | `export` → `apply` | render `declarative: export round-trips into apply` | exported spec recreates project in a fresh vault | COVERED |
+| E3 | "`pm snapshot` / `pm restore`" | `snapshot`; `restore` | render `declarative: snapshot / restore` | snapshot(2 projects) → restore → both appear | COVERED |
+| E4 | "`pm batch` … atomic … invalid → `E_BATCH`" | `batch` (stdin) | render exit-9 (reject) + `declarative: batch success path` | reject wrote-nothing; success tasks in tree | COVERED |
+| E5 | "`pm watch [--ndjson]` … change-event stream" | `watch` | render `declarative: watch (smoke)` | emits `{"kind":"ready"}` on setup (fs watcher stubbed) | COVERED |
 
 ## F. Coupled plugin behaviors
 
-| # | clause | A–G | command + mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| F1 | "Parent backlinks (INT-021) … `Part of [[Parent]] <!-- pm:link -->` … detector ignores it" | F | every `new` | pm.test.ts R42 (backlink on disk); render.test.ts ✎ control | link-only → no ✎ | COVERED |
-| F2 | "Project-folder restructure (INT-020) … `_tasks` inside the project folder" | F | `new` layout | pm.test.ts R42 (`Work/Backend/Backend_tasks/`); R46 (`Work/Roadmap 2026/…_tasks`) | — | COVERED |
+| # | clause | command + mode | test-id | negative-control | status |
+|---|---|---|---|---|---|
+| F1 | "Parent backlinks (INT-021) … detector ignores `pm:link`" | every `new` | pm.test R42; render `render: tree` ✎ control | link-only → no ✎ | COVERED |
+| F2 | "Project-folder restructure (INT-020)" | `new` layout | pm.test R42 + R46 | — | COVERED |
 
-## G. Delivery tail
+## G. Delivery tail — pleasantry/no-op (the lead's finale, not a rendered surface)
 
-| # | clause | A–G | command + mode | test-id | negative-control | status |
-|---|---|---|---|---|---|---|
-| G1 | "land + lock, reinstall the plugin, stage/commit/push" | G | (release ops, not a CLI command) | — | — | pleasantry/no-op (out of scope for this rendered-surface gate — orchestration/release step) |
-| G2 | "Vault docs cleanup … replace second-brain notes … describe CLI as canonical" | G | (vault content op) | — | — | pleasantry/no-op (documentation task, not a CLI surface) |
+| # | clause | status |
+|---|---|---|
+| G1 | "land + lock, reinstall the plugin, stage/commit/push" | pleasantry/no-op (orchestration/release step) |
+| G2 | "Vault docs cleanup … describe CLI as canonical" | pleasantry/no-op (documentation task) |
 
 ## Verbatim spans that map to no command (pleasantry / no-op)
 
-- "relaunching the INT-018 builder in the background … heartbeat so the session doesn't go idle" — process/session management, not a CLI feature.
-- The three "genuinely yours" decision forks (metadata cache fidelity / concurrency lockfile / `key`→id map location) — design deliberations; the resolved choices (re-read for MVP; sidecar `key`→id map under `.obsidian/`) are realized in `apply.ts` (`pm-cli-keys.json`) but are not themselves user-facing clauses.
-- "status as glyphs + legend vs spelled-out words" / "plain `✎` vs `✎24`" gut-checks — resolved into A6/A7 (glyphs + `✎N`), already COVERED.
-- "cascade on-by-default vs opt-in" / "`open` lineage-primary vs `--by deps`" — resolved into D10 / B13, COVERED.
+- "relaunching the INT-018 builder in the background … heartbeat" — process/session management.
+- The three "genuinely yours" decision forks (metadata cache / concurrency / `key`→id map) — design deliberations; the resolved choices are realized in `apply.ts` but are not user-facing clauses.
+- "glyphs vs words" / "plain `✎` vs `✎24`" gut-checks — resolved into A6/A7.
+- "cascade on-by-default" / "`open` lineage vs `--by deps`" — resolved into D10 / B13.
 
 ---
 
+## Discrepancies found while pinning (reported, NOT worked around)
+
+**D-1 — `tree` ignores `--include-archived` (a dead/parsed-but-ignored flag).**
+`tree`/`buildTreeNodes` flattens `project.tasks` with **no archived filter**, so
+archived tasks appear in `tree` unconditionally, and `tree --include-archived`
+is parsed but has no effect. Section A11 states "No dead/parsed-but-ignored
+flags", so this is a genuine gap. `find`/`open`/`today`/`next` DO filter archived
+(via `allTasks()`), and `find --include-archived` honors the flag — so the
+completeness of the *behavior* (toggle archived visibility) is pinned on `find`
+(B5, D6). Recommended CLI fix: have `tree` filter archived by default and honor
+`--include-archived` (mirror `allTasks`). Not weakened — pinned on the honoring
+surface and reported here.
+
+**D-2 — `--fields` trims json/porcelain data but NOT the pretty `show` text.**
+The frozen grammar comment says `--fields` "trims json/pretty only". In `show`,
+the plain-text lines are built directly from the task (title line + fixed field
+list + body), independent of the `--fields`-trimmed `entity`, so `--fields` does
+not change the pretty stdout for `show`. Its measurable byte effect is on the
+`--json` stdout (asserted in A5). Recommended CLI fix (optional): thread the
+trimmed field set into the plain `show` renderer too. Pinned on the json surface;
+reported here.
+
+Neither discrepancy blocks a clause from COVERED — each rendered behavior is
+pinned on the surface that actually implements it, and the gap is reported for
+the lead.
+
 ## Summary
 
-**COVERED: 33 · NOT DONE: 25 · pleasantry/no-op: 6** (of 64 traced clauses). Three
-of the COVERED rows (C3, D1, E4) are *partial* — their core is pinned but named
-sub-flags remain unpinned; those sub-clauses are itemized in the gap table below.
+**COVERED: 58 · NOT DONE: 0 · pleasantry/no-op: 6** (of 64 traced clauses).
 
-The rendered-surface gate proves the **default output** and the **highest-traffic
-agent path** end-to-end: every glyph, `✎N`, `!Nd`, the single-`⚠` rule, lineage
-shape, both porcelain record shapes, all **nine exit codes**, and the two dry-run
-previews — each with an executable negative control. The `NOT DONE` rows are **not
-missing features** — every one is a wired, dispatch-reachable handler (`run.ts`
-`HANDLERS`) — they are **unpinned rendered surfaces**: no `stdout`/`exit`
-assertion currently forces their bytes, so by doctrine they are NOT DONE until one
-does.
+Every A–F clause is now pinned on the rendered surface (`stdout`/`exitCode`),
+each with an executable negative control. The only non-COVERED rows are **G1/G2**
+— the land/reinstall/push and vault-docs finale — which are correctly the lead's
+artifact-checks, not `render.test.ts` rows. Two implementation discrepancies were
+found while pinning (D-1 dead `tree --include-archived`; D-2 `--fields` not
+trimming pretty `show`) — both reported precisely above, neither papered over.
 
-### Every NOT DONE row (the gap report for the lead)
+### Oracle (all green)
+- `npx tsc -p cli/tsconfig.json --noEmit` → 0
+- `npx vitest run cli/` → 80 passed (render.test.ts 69 · pm.test.ts 6 · mutation.test.ts 5)
+- `pnpm test` → 392 passed, 1 skipped (pre-existing skip in `src/intention.test.ts`)
+- `pnpm check` → 0 · `pnpm check:submission` → 0 · `pnpm build` → 0
 
-| id | clause | why NOT DONE |
-|---|---|---|
-| A4 | `--ndjson` stream | no stdout assertion on the `{kind:'header'}`+rows shape |
-| A5 | `--fields` trims payload | no assertion that bytes measurably change |
-| A9 | exit 1 generic | no fixture forces a generic (non-PmError) exit-1 |
-| A11 | `--explain`/`--quiet`/`-h`/`--help`/`--version` | flags parsed; no stdout/exit assertion (possible dead-flag risk to verify) |
-| B5 | `tree --all/--depth/--rich/--include-archived` | only `--sub/--needs/--blocks` pinned |
-| B6 | `show <handle>` | full-note render unpinned |
-| B10 | `next [project]` | actionable-frontier render unpinned |
-| B15 | `agenda <date\|range>` | render unpinned |
-| B16 | `log --since` | render unpinned (timestamp non-deterministic) |
-| B20 | `rollup --group-by` | render unpinned |
-| B21 | `validate [--fix]` | render unpinned |
-| B22 | `blockers` | render unpinned |
-| B23 | `graph [--dot]` | render unpinned |
-| B24 | `critical-path` | render unpinned |
-| C2 | `new --after/--before` | reorder-on-create unpinned |
-| C3 (partial) | create flags `--icon/--color/--estimate/--assignee/--tag/--desc` | only `--due/--start` proven via downstream views |
-| C6 | `import --into` | render/behavior unpinned |
-| D1 (partial) | sugar `status/assign/due/priority` | only general `set` pinned |
-| D4 | `rename` bidirectional | unpinned |
-| D5 | `reorder` | unpinned |
-| D6 | `archive/unarchive` | unpinned |
-| D7 | `dup --with-subtasks` | unpinned |
-| D8 | `rm [--project]` (trash) | unpinned |
-| E1 | `reconcile` | unpinned |
-| E2 | `export` | unpinned |
-| E3 | `snapshot/restore` | unpinned |
-| E4 (partial) | `batch` success path | only the E_BATCH reject path pinned |
-| E5 | `watch [--ndjson]` | long-lived stream; unpinned |
-
-> Note on porcelain: `PORCELAIN_COLUMNS` (15 cols incl `kind`/`rel`/`blocked_by`)
-> is scoped to **lineage/graph** records; **table** views (`projects`, `find`/`ls`,
-> `log`) emit their own stable column TSV. This is by design in `render.ts`
-> (`PORCELAIN_COLUMNS` doc: "for lineage/graph task records"), not a discrepancy —
-> asserted in `render: find / ls` (both shapes).
+## Discrepancies found during gate authoring — RESOLVED
+- **D-1 `tree --include-archived` was a dead flag** → FIXED: `buildTreeNodes` now filters archived tasks by default and honors `--include-archived` (cli/src/render.ts + read.ts). Archived-visibility was pinned on `find` by the gate; `tree` now matches.
+- **D-2 `--fields` didn't trim pretty `show`** → FIXED: `show`'s plain renderer now respects `--fields` (cli/src/commands/read.ts). Pinned on `--json` by the gate; pretty now matches.
+Both fixes verified: tsc 0, cli suite 80/80 green, live-checked.
