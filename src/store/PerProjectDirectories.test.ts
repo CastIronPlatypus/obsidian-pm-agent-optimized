@@ -31,9 +31,9 @@ describe('per-project directories — path frontmatter', () => {
     const project = await store.createProject('Q3 Launch', 'Projects/Income/2026')
     const fm = await frontmatterOf(vault, project.filePath)
     expect(fm.path).toBe('Projects/Income/2026')
-    expect(project.filePath).toBe('Projects/Income/2026/Q3 Launch.md')
-    // Task folder is co-located under the same directory.
-    expect(vault.getAbstractFileByPath('Projects/Income/2026/Q3 Launch_tasks')).not.toBeNull()
+    expect(project.filePath).toBe('Projects/Income/2026/Q3 Launch/Q3 Launch.md')
+    // Task folder is co-located under the same directory, inside the per-project folder.
+    expect(vault.getAbstractFileByPath('Projects/Income/2026/Q3 Launch/Q3 Launch_tasks')).not.toBeNull()
   })
 
   it('reload preserves `path` through the YAML round-trip', async () => {
@@ -86,8 +86,8 @@ describe('per-project directories — vault-wide discovery', () => {
 
     const found = await store.discoverProjects()
     const paths = found.map((p) => p.filePath)
-    expect(paths).toContain('Projects/In Default.md')
-    expect(paths).toContain('Random/Deep/Place/Off Grid.md')
+    expect(paths).toContain('Projects/In Default/In Default.md')
+    expect(paths).toContain('Random/Deep/Place/Off Grid/Off Grid.md')
   })
 
   it('discovers two same-named projects in different folders as distinct entries', async () => {
@@ -97,7 +97,10 @@ describe('per-project directories — vault-wide discovery', () => {
 
     const found = await store.discoverProjects()
     const roadmaps = found.filter((p) => p.title === 'Roadmap')
-    expect(roadmaps.map((p) => p.filePath).sort()).toEqual(['Areas/Community/Roadmap.md', 'Areas/Income/Roadmap.md'])
+    expect(roadmaps.map((p) => p.filePath).sort()).toEqual([
+      'Areas/Community/Roadmap/Roadmap.md',
+      'Areas/Income/Roadmap/Roadmap.md'
+    ])
     expect(roadmaps.map((p) => store.projectDirectory(p)).sort()).toEqual(['Areas/Community', 'Areas/Income'])
   })
 
@@ -108,14 +111,14 @@ describe('per-project directories — vault-wide discovery', () => {
     await vault.create('Notes/Task.md', ['---', 'pm-task: true', 'title: loose task', '---', ''].join('\n'))
 
     const found = await store.discoverProjects()
-    expect(found.map((p) => p.filePath)).toEqual(['Projects/Real.md'])
+    expect(found.map((p) => p.filePath)).toEqual(['Projects/Real/Real.md'])
   })
 
   it('loadAllProjects delegates to vault-wide discovery', async () => {
     const { store } = newStore()
     await store.createProject('Anywhere', 'Somewhere/Else')
     const found = await store.loadAllProjects('Projects')
-    expect(found.some((p) => p.filePath === 'Somewhere/Else/Anywhere.md')).toBe(true)
+    expect(found.some((p) => p.filePath === 'Somewhere/Else/Anywhere/Anywhere.md')).toBe(true)
   })
 })
 
@@ -127,11 +130,11 @@ describe('per-project directories — moveProject (editable folder path)', () =>
 
     await store.moveProject(project, 'A/B/C/D')
 
-    expect(vault.getAbstractFileByPath('A/B/C/D/Deep.md')).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath('A/B/C/D/Deep_tasks')).toBeInstanceOf(TFolder)
-    expect(vault.getAbstractFileByPath('Projects/Deep.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('A/B/C/D/Deep/Deep.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('A/B/C/D/Deep/Deep_tasks')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Deep/Deep.md')).toBeNull()
     expect(store.projectDirectory(project)).toBe('A/B/C/D')
-    expect(project.tasks[0]?.filePath?.startsWith('A/B/C/D/Deep_tasks/')).toBe(true)
+    expect(project.tasks[0]?.filePath?.startsWith('A/B/C/D/Deep/Deep_tasks/')).toBe(true)
   })
 
   it('is a no-op when the destination equals the current directory', async () => {
@@ -145,20 +148,20 @@ describe('per-project directories — moveProject (editable folder path)', () =>
 
     expect(project.filePath).toBe(beforeFilePath)
     expect(project.tasks[0]?.filePath).toBe(beforeTaskPath)
-    expect(vault.getAbstractFileByPath('Projects/Steady.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Projects/Steady/Steady.md')).toBeInstanceOf(TFile)
   })
 
   it('throws (without overwriting) when the destination .md is already occupied', async () => {
     const { store, vault } = newStore()
     const project = await store.createProject('Clash', 'Projects')
-    // Pre-existing note occupies the target path.
-    await vault.create('Areas/Clash.md', ['---', 'title: squatter', '---', '', 'do not touch'].join('\n'))
+    // Pre-existing content occupies the target per-project folder `Areas/Clash`.
+    await vault.create('Areas/Clash/Clash.md', ['---', 'title: squatter', '---', '', 'do not touch'].join('\n'))
 
     await expect(store.moveProject(project, 'Areas')).rejects.toThrow(/already exists/i)
 
     // Nothing moved; the squatter is intact, the project stays put.
-    expect(vault.getAbstractFileByPath('Projects/Clash.md')).toBeInstanceOf(TFile)
-    const squatter = await vault.cachedRead(fileAt(vault, 'Areas/Clash.md'))
+    expect(vault.getAbstractFileByPath('Projects/Clash/Clash.md')).toBeInstanceOf(TFile)
+    const squatter = await vault.cachedRead(fileAt(vault, 'Areas/Clash/Clash.md'))
     expect(squatter).toContain('do not touch')
     expect(store.projectDirectory(project)).toBe('Projects')
   })
@@ -169,7 +172,7 @@ describe('per-project directories — moveProject (editable folder path)', () =>
     const archived = makeTask({ title: 'done thing' })
     await store.insertTask(project, archived)
     // Drop an attachment beside the task, then archive it.
-    const attachmentDir = 'Projects/Portfolio_tasks/' + archived.id + '/attachments'
+    const attachmentDir = 'Projects/Portfolio/Portfolio_tasks/' + archived.id + '/attachments'
     await vault.createFolder(attachmentDir)
     await vault.create(attachmentDir + '/spec.txt', 'attachment body')
     await store.archiveTask(project, archived.id)
@@ -178,14 +181,16 @@ describe('per-project directories — moveProject (editable folder path)', () =>
     await store.moveProject(project, 'Areas/Archive Home')
 
     // Archived file, its Archive subfolder, and the attachment all relocated.
-    expect(vault.getAbstractFileByPath('Areas/Archive Home/Portfolio_tasks/Archive')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Areas/Archive Home/Portfolio/Portfolio_tasks/Archive')).toBeInstanceOf(TFolder)
     const movedTaskPath = project.tasks[0]?.filePath ?? ''
-    expect(movedTaskPath.startsWith('Areas/Archive Home/Portfolio_tasks/Archive/')).toBe(true)
+    expect(movedTaskPath.startsWith('Areas/Archive Home/Portfolio/Portfolio_tasks/Archive/')).toBe(true)
     expect(vault.getAbstractFileByPath(movedTaskPath)).toBeInstanceOf(TFile)
     expect(
-      vault.getAbstractFileByPath('Areas/Archive Home/Portfolio_tasks/' + archived.id + '/attachments/spec.txt')
+      vault.getAbstractFileByPath(
+        'Areas/Archive Home/Portfolio/Portfolio_tasks/' + archived.id + '/attachments/spec.txt'
+      )
     ).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath('Projects/Portfolio_tasks')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Portfolio/Portfolio_tasks')).toBeNull()
   })
 
   it('honors spaces and unicode in the destination path literally', async () => {
@@ -196,9 +201,9 @@ describe('per-project directories — moveProject (editable folder path)', () =>
 
     await store.moveProject(project, spacedDir)
 
-    expect(vault.getAbstractFileByPath(`${spacedDir}/Café Plan.md`)).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath(`${spacedDir}/Café Plan_tasks`)).toBeInstanceOf(TFolder)
-    expect(project.filePath).toBe(`${spacedDir}/Café Plan.md`)
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Café Plan/Café Plan.md`)).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Café Plan/Café Plan_tasks`)).toBeInstanceOf(TFolder)
+    expect(project.filePath).toBe(`${spacedDir}/Café Plan/Café Plan.md`)
     const fm = await frontmatterOf(vault, project.filePath)
     expect(fm.path).toBe(spacedDir)
   })
@@ -207,8 +212,8 @@ describe('per-project directories — moveProject (editable folder path)', () =>
     const { store } = newStore()
     const project = await store.createProject('Echoless', 'Projects')
     await store.moveProject(project, 'Areas/Quiet')
-    // Mirrors renameProject's discipline: old + new project paths are consumable.
-    expect(store.consumeSelfWrite('Areas/Quiet/Echoless.md')).toBe(true)
-    expect(store.consumeSelfWrite('Projects/Echoless.md')).toBe(true)
+    // Mirrors renameProject's discipline: old + new nested note paths are consumable.
+    expect(store.consumeSelfWrite('Areas/Quiet/Echoless/Echoless.md')).toBe(true)
+    expect(store.consumeSelfWrite('Projects/Echoless/Echoless.md')).toBe(true)
   })
 })

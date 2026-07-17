@@ -103,6 +103,12 @@ export class FakeVault {
       for (const f of folders) this.folders.delete(f.path)
       for (const e of entries) this.files.delete(e.file.path)
       detachFromParent(file)
+      // Rebuild child links from scratch: the moved folders' stale `children`
+      // arrays still point at their descendants, so clear them and re-push once
+      // (otherwise a re-parented child would appear twice).
+      for (const f of folders) f.children = []
+      // Shallow-to-deep so each moved parent is registered before its children.
+      folders.sort((a, b) => a.path.length - b.path.length)
       for (const f of folders) {
         const np = to + f.path.slice(from.length)
         const parent = this.ensureFolderForPath(np)

@@ -82,7 +82,7 @@ describe('Feature 1 — external task ingestion', () => {
     // negative-control: a plain note with no `pm-task: true` must NOT be ingested (see R6).
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
-    const path = 'Projects/Inbox_tasks/manual-add.md'
+    const path = 'Projects/Inbox/Inbox_tasks/manual-add.md'
     await vault.create(path, taskFileBody(['---', 'pm-task: true', 'title: Manually added task', '---', '', 'A body.']))
     const file = fileAt(vault, path)
 
@@ -97,7 +97,7 @@ describe('Feature 1 — external task ingestion', () => {
     // negative-control: ingest that returns a task but never adds it to project.tasks.
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
-    const path = 'Projects/Inbox_tasks/appears.md'
+    const path = 'Projects/Inbox/Inbox_tasks/appears.md'
     await vault.create(path, taskFileBody(['---', 'pm-task: true', 'title: Shows up', '---', '', 'body']))
 
     const ingest = probe(store).ingestExternalTask
@@ -113,7 +113,7 @@ describe('Feature 1 — external task ingestion', () => {
     // negative-control: a file whose `id` stays blank/absent after ingestion.
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
-    const path = 'Projects/Inbox_tasks/no-id.md'
+    const path = 'Projects/Inbox/Inbox_tasks/no-id.md'
     // No `id` key at all — the store must backfill and persist one.
     await vault.create(path, taskFileBody(['---', 'pm-task: true', 'title: Needs an id', '---', '', 'body']))
 
@@ -133,7 +133,7 @@ describe('Feature 1 — external task ingestion', () => {
     // negative-control: blank `status:`/`priority:` left as null/'' instead of defaults.
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
-    const path = 'Projects/Inbox_tasks/blanks.md'
+    const path = 'Projects/Inbox/Inbox_tasks/blanks.md'
     await vault.create(
       path,
       taskFileBody(['---', 'pm-task: true', 'title: Blank fields', 'status:', 'priority:', '---', '', 'body'])
@@ -154,7 +154,7 @@ describe('Feature 1 — external task ingestion', () => {
     // negative-control: task ingested but its id never added to the project's taskIds.
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
-    const path = 'Projects/Inbox_tasks/ordered.md'
+    const path = 'Projects/Inbox/Inbox_tasks/ordered.md'
     await vault.create(path, taskFileBody(['---', 'pm-task: true', 'title: Ordered', '---', '', 'body']))
 
     const ingest = probe(store).ingestExternalTask
@@ -176,7 +176,7 @@ describe('Feature 1 — external task ingestion', () => {
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
     const before = project.tasks.length
-    const path = 'Projects/Inbox_tasks/not-a-task.md'
+    const path = 'Projects/Inbox/Inbox_tasks/not-a-task.md'
     await vault.create(path, taskFileBody(['---', 'title: Just a note', '---', '', 'not a pm task']))
 
     const ingest = probe(store).ingestExternalTask
@@ -191,7 +191,7 @@ describe('Feature 1 — external task ingestion', () => {
     // negative-control: backfill write NOT self-marked -> the modify event re-ingests (echo).
     const { store, vault } = newStore()
     const project = await store.createProject('Inbox', 'Projects')
-    const path = 'Projects/Inbox_tasks/selfmark.md'
+    const path = 'Projects/Inbox/Inbox_tasks/selfmark.md'
     await vault.create(path, taskFileBody(['---', 'pm-task: true', 'title: Self mark', '---', '', 'body']))
 
     const ingest = probe(store).ingestExternalTask
@@ -228,7 +228,9 @@ describe('Feature 2 — per-project directories', () => {
     expect(discover, 'ProjectStore.discoverProjects() must exist').toBeTypeOf('function')
     if (!discover) return
     const found = await discover.call(store)
-    expect(found.some((p) => p.filePath === path)).toBe(true)
+    // INT-020: the flat-seeded project is migrated on load into its nested
+    // per-project folder, so it is discovered at the nested note path.
+    expect(found.some((p) => p.filePath === 'Random/Place/Wandering/Wandering.md')).toBe(true)
   })
 
   it('R10: create-project accepts custom path', async () => {
@@ -236,8 +238,8 @@ describe('Feature 2 — per-project directories', () => {
     const { store, vault } = newStore()
     const dir = 'Clients/Acme'
     const project = await store.createProject('Acme Rollout', dir)
-    // Files are co-located under the custom directory.
-    expect(vault.getAbstractFileByPath(`${dir}/Acme Rollout_tasks`)).toBeInstanceOf(TFolder)
+    // Files are co-located under the custom directory, inside the per-project folder.
+    expect(vault.getAbstractFileByPath(`${dir}/Acme Rollout/Acme Rollout_tasks`)).toBeInstanceOf(TFolder)
 
     const directoryOf = probe(store).projectDirectory
     expect(directoryOf, 'ProjectStore.projectDirectory(project) must exist').toBeTypeOf('function')
@@ -283,15 +285,15 @@ describe('Feature 2 — per-project directories', () => {
     await move.call(store, project, 'Areas/Portfolio')
 
     // Forensic: the project file + its `<Name>_tasks` folder now live under the
-    // new directory, and nothing remains at the old location.
-    expect(vault.getAbstractFileByPath('Areas/Portfolio/Relocatable.md')).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath('Areas/Portfolio/Relocatable_tasks')).toBeInstanceOf(TFolder)
-    expect(vault.getAbstractFileByPath('Projects/Relocatable.md')).toBeNull()
-    expect(vault.getAbstractFileByPath('Projects/Relocatable_tasks')).toBeNull()
+    // new directory (inside the per-project folder), and nothing remains at the old location.
+    expect(vault.getAbstractFileByPath('Areas/Portfolio/Relocatable/Relocatable.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Areas/Portfolio/Relocatable/Relocatable_tasks')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Relocatable/Relocatable.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Relocatable/Relocatable_tasks')).toBeNull()
 
     // The task file moved with the folder (not orphaned at the old path).
     const movedTaskPath = project.tasks[0]?.filePath ?? ''
-    expect(movedTaskPath.startsWith('Areas/Portfolio/Relocatable_tasks/')).toBe(true)
+    expect(movedTaskPath.startsWith('Areas/Portfolio/Relocatable/Relocatable_tasks/')).toBe(true)
     expect(vault.getAbstractFileByPath(movedTaskPath)).toBeInstanceOf(TFile)
 
     // The persisted `path` frontmatter + resolved directory both track the new dir.
@@ -321,16 +323,16 @@ describe('Feature 2 — per-project directories', () => {
 
     // Files land at the LITERAL spaced path (no truncation, no wrong split) and
     // stay discoverable there; nothing is left behind at the old location.
-    expect(vault.getAbstractFileByPath(`${spacedDir}/Quarterly Plan.md`)).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath(`${spacedDir}/Quarterly Plan_tasks`)).toBeInstanceOf(TFolder)
-    expect(vault.getAbstractFileByPath('Projects/Quarterly Plan.md')).toBeNull()
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Quarterly Plan/Quarterly Plan.md`)).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath(`${spacedDir}/Quarterly Plan/Quarterly Plan_tasks`)).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Quarterly Plan/Quarterly Plan.md')).toBeNull()
 
     const movedTaskPath = project.tasks[0]?.filePath ?? ''
-    expect(movedTaskPath.startsWith(`${spacedDir}/Quarterly Plan_tasks/`)).toBe(true)
+    expect(movedTaskPath.startsWith(`${spacedDir}/Quarterly Plan/Quarterly Plan_tasks/`)).toBe(true)
 
     const fm = await frontmatterOf(vault, project.filePath)
     expect(fm.path).toBe(spacedDir)
-    expect(project.filePath).toBe(`${spacedDir}/Quarterly Plan.md`)
+    expect(project.filePath).toBe(`${spacedDir}/Quarterly Plan/Quarterly Plan.md`)
   })
 
   it('R28: dashboard refresh predicate is vault-wide, not folder-scoped', async () => {
@@ -419,10 +421,10 @@ describe('Feature 3 — bi-directional renames', () => {
     if (!rename) return
     await rename.call(store, project, 'Delta')
 
-    // Forensic: the .md and its _tasks folder now live at the new path; the old ones are gone.
-    expect(vault.getAbstractFileByPath('Projects/Delta.md')).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath('Projects/Gamma.md')).toBeNull()
-    expect(vault.getAbstractFileByPath('Projects/Delta_tasks')).toBeInstanceOf(TFolder)
+    // Forensic: the .md and its _tasks folder now live at the new nested path; the old ones are gone.
+    expect(vault.getAbstractFileByPath('Projects/Delta/Delta.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Projects/Gamma/Gamma.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Delta/Delta_tasks')).toBeInstanceOf(TFolder)
   })
 
   it('R14: rename echo loop prevented', async () => {
@@ -438,9 +440,9 @@ describe('Feature 3 — bi-directional renames', () => {
     if (!rename) return
     await rename.call(store, project, 'Kappa')
 
-    // Both new and old paths are self-marked so the rename event is ignored (no echo).
-    expect(store.consumeSelfWrite('Projects/Kappa.md')).toBe(true)
-    expect(store.consumeSelfWrite('Projects/Iota.md')).toBe(true)
+    // Both new and old nested note paths are self-marked so the rename event is ignored (no echo).
+    expect(store.consumeSelfWrite('Projects/Kappa/Kappa.md')).toBe(true)
+    expect(store.consumeSelfWrite('Projects/Iota/Iota.md')).toBe(true)
   })
 
   it('R15: task folder rename tracked', async () => {
@@ -452,16 +454,16 @@ describe('Feature 3 — bi-directional renames', () => {
     if (!project) return
     await store.insertTask(project, makeTask({ title: 'attached' }))
 
-    await vault.rename(fileAt(vault, 'Projects/Eta.md'), 'Projects/Theta.md')
+    await vault.rename(fileAt(vault, 'Projects/Eta/Eta.md'), 'Projects/Eta/Theta.md')
 
     const handle = probe(store).handleExternalRename
     expect(handle).toBeTypeOf('function')
     if (!handle) return
-    await handle.call(store, 'Projects/Eta.md', fileAt(vault, 'Projects/Theta.md'))
+    await handle.call(store, 'Projects/Eta/Eta.md', fileAt(vault, 'Projects/Eta/Theta.md'))
 
     expect(project.tasks.length).toBe(1)
     const fp = project.tasks[0]?.filePath ?? ''
-    expect(fp.startsWith('Projects/Theta_tasks/')).toBe(true)
+    expect(fp.startsWith('Projects/Eta/Theta_tasks/')).toBe(true)
   })
 })
 
@@ -770,7 +772,7 @@ describe('Feature 5: self-describing status palettes', () => {
     if (!ingest) return
 
     // Case-mismatch of the known id 'todo' → normalized to the canonical id.
-    const casePath = 'Projects/Inbox_tasks/case-mismatch.md'
+    const casePath = 'Projects/Inbox/Inbox_tasks/case-mismatch.md'
     await vault.create(
       casePath,
       taskFileBody(['---', 'pm-task: true', 'title: Case', 'status: Todo', '---', '', 'body'])
@@ -781,7 +783,7 @@ describe('Feature 5: self-describing status palettes', () => {
     expect(cased.status, "case-mismatched 'Todo' must normalize to canonical 'todo'").toBe('todo')
 
     // Unknown value → PRESERVED (never destroy AI/user data); the task still loads.
-    const unknownPath = 'Projects/Inbox_tasks/unknown-status.md'
+    const unknownPath = 'Projects/Inbox/Inbox_tasks/unknown-status.md'
     await vault.create(
       unknownPath,
       taskFileBody(['---', 'pm-task: true', 'title: Unknown', 'status: blocked-ish', '---', '', 'body'])

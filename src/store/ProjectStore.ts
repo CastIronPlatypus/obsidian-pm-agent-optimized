@@ -329,6 +329,9 @@ export class ProjectStore implements TaskSource {
    * cheaply; on a cache miss the file is read and filtered by `loadProject`.
    */
   async discoverProjects(): Promise<Project[]> {
+    // INT-020: migration-on-load. Relocate any legacy flat-layout project into
+    // the nested per-project-folder layout before scanning, idempotently.
+    await this.migrateLegacyProjects()
     const candidates: TFile[] = []
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cached = this.app.metadataCache.getFileCache(file)?.frontmatter
@@ -343,16 +346,116 @@ export class ProjectStore implements TaskSource {
   }
 
   /**
+   * Migrate legacy flat-layout projects into the INT-020 nested per-project-folder
+   * layout (R34). A legacy project is a `pm-project: true` note at `<dir>/<Name>.md`
+   * whose parent folder is NOT named after it; it is relocated to
+   * `<dir>/<Name>/<Name>.md`, and its sibling `<dir>/<Name>_tasks/` folder (if any)
+   * moves with it to `<dir>/<Name>/<Name>_tasks/` — via vault rename, so the note
+   * body and task association are preserved. Already-nested projects are left
+   * untouched, so the pass is idempotent and re-runnable. Every touched path is
+   * self-write-marked so the resulting vault events do not re-ingest.
+   *
+   * With `{ dryRun: true }` it performs no writes and returns the list of moves
+   * that WOULD happen (`{ from, to }` note paths) — the command wiring is deferred.
+   */
+  async migrateLegacyProjects(options?: { dryRun?: boolean }): Promise<Array<{ from: string; to: string }>> {
+    const dryRun = options?.dryRun ?? false
+    interface LegacyProject {
+      notePath: string
+      name: string
+      targetFolder: string
+      targetNote: string
+      oldTasks: string
+      newTasks: string
+    }
+    const legacy: LegacyProject[] = []
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const notePath = normalizePath(file.path)
+      let frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter ?? null
+      if (frontmatter && frontmatter[FRONTMATTER_KEY] !== true) continue
+      if (!frontmatter) {
+        try {
+          frontmatter = parseFrontmatter(await this.app.vault.cachedRead(file)).frontmatter
+        } catch {
+          frontmatter = null
+        }
+      }
+      if (!frontmatter || frontmatter[FRONTMATTER_KEY] !== true) continue
+
+      const name = fileNameFromPath(notePath)
+      const parent = parentDirOf(notePath)
+      // Already nested (per-project folder named after the project) → no-op.
+      if (parent && fileNameFromPath(parent) === name) continue
+
+      const targetFolder = normalizePath(parent ? `${parent}/${name}` : name)
+      if (this.app.vault.getAbstractFileByPath(targetFolder)) {
+        // The destination folder is occupied — leave the project in its current
+        // (flat) layout rather than clobbering (WS-007 failure behavior).
+        console.warn(`[PM] Cannot migrate "${notePath}": "${targetFolder}" already exists.`)
+        continue
+      }
+      legacy.push({
+        notePath,
+        name,
+        targetFolder,
+        targetNote: normalizePath(`${targetFolder}/${name}.md`),
+        oldTasks: normalizePath(`${parent ? `${parent}/` : ''}${name}_tasks`),
+        newTasks: normalizePath(`${targetFolder}/${name}_tasks`)
+      })
+    }
+
+    const moves = legacy.map((l) => ({ from: l.notePath, to: l.targetNote }))
+    if (dryRun) return moves
+
+    for (const l of legacy) {
+      await this.ensureFolder(l.targetFolder)
+      // Move the sibling tasks folder (attachments + Archive travel with it) first.
+      const tasksFolder = this.app.vault.getAbstractFileByPath(l.oldTasks)
+      if (tasksFolder instanceof TFolder && !this.app.vault.getAbstractFileByPath(l.newTasks)) {
+        this.markSelfWrite(l.oldTasks)
+        this.markSelfWrite(l.newTasks)
+        await this.app.fileManager.renameFile(tasksFolder, l.newTasks)
+      }
+      // Move the project note into its new per-project folder.
+      const note = this.app.vault.getAbstractFileByPath(l.notePath)
+      if (note instanceof TFile) {
+        this.markSelfWrite(l.notePath)
+        this.markSelfWrite(l.targetNote)
+        await this.app.fileManager.renameFile(note, l.targetNote)
+      }
+      // Drop any stale cache entry keyed by the old flat path so it reloads fresh.
+      this.projectCache.delete(l.notePath)
+    }
+    return moves
+  }
+
+  /**
    * Resolve the vault-relative directory a project lives in: its declared `path`
-   * frontmatter when present and non-blank, otherwise the file's actual parent
-   * folder (legacy fallback, R11). Task files resolve against this directory.
+   * frontmatter when present and non-blank, otherwise the directory the project
+   * is filed under (legacy fallback, R11 / INT-020 R33). Task files resolve
+   * against this directory.
    */
   projectDirectory(project: Project): string {
     const declared = project.path?.trim()
     if (declared) return declared
-    const fp = project.filePath
-    const idx = fp.lastIndexOf('/')
-    return idx > 0 ? fp.slice(0, idx) : ''
+    return this.filedUnderDir(project.filePath)
+  }
+
+  /**
+   * The vault-relative directory a project is FILED UNDER — the directory that
+   * contains its per-project folder (INT-020 nested layout). For a nested note
+   * `<dir>/<Name>/<Name>.md` (the per-project folder is named after the project)
+   * this is `<dir>`; for an un-migrated legacy flat note `<dir>/<Name>.md` it is
+   * the note's own parent folder `<dir>`. Blank/absent `path` resolves through
+   * here, so both layouts keep loading and rendering.
+   */
+  private filedUnderDir(notePath: string): string {
+    const parent = parentDirOf(notePath)
+    const noteBase = fileNameFromPath(notePath)
+    const parentBase = fileNameFromPath(parent)
+    // Nested layout: the note sits inside a folder named after the project.
+    if (parent && parentBase === noteBase) return parentDirOf(parent)
+    return parent
   }
 
   /**
@@ -838,10 +941,16 @@ export class ProjectStore implements TaskSource {
 
   async createProject(title: string, folder: string): Promise<Project> {
     const safeName = title.replace(/[\\/:*?"<>|]/g, '-')
-    const filePath = normalizePath(`${folder}/${safeName}.md`)
+    // INT-020 nested layout: every project lives in its OWN folder
+    // `<folder>/<Name>/`, with the note at `<folder>/<Name>/<Name>.md` and the
+    // tasks folder nested one level down at `<folder>/<Name>/<Name>_tasks/`.
+    const dir = normalizePath(folder)
+    const projectFolder = dir ? `${dir}/${safeName}` : safeName
+    const filePath = normalizePath(`${projectFolder}/${safeName}.md`)
     const project = makeProject(title, filePath)
-    // Persist the caller-supplied directory as the project's `path` so discovery
-    // and task resolution can honor it wherever the file lives (INT-014, R8/R10).
+    // Persist the caller-supplied directory as the project's `path` — the
+    // directory the project is FILED UNDER (which now CONTAINS the per-project
+    // folder), so discovery + task resolution honor it (INT-014 R8/R10, INT-020 R33).
     project.path = folder
     await this.ensureFolder(this.projectTaskFolder(project))
     await this.saveProject(project)
@@ -969,16 +1078,35 @@ export class ProjectStore implements TaskSource {
    */
   async renameProject(project: Project, newTitle: string): Promise<void> {
     const oldPath = normalizePath(project.filePath)
-    const parentDir = parentDirOf(oldPath)
+    const oldName = fileNameFromPath(oldPath)
     const safeName = newTitle.replace(/[\\/:*?"<>|]/g, '-')
-    const newPath = normalizePath(parentDir ? `${parentDir}/${safeName}.md` : `${safeName}.md`)
-    if (newPath === oldPath) {
+    if (safeName === oldName) {
       // Same on-disk name (title differs only cosmetically); just persist the title.
       project.title = newTitle
       await this.saveProject(project)
       return
     }
-    if (this.app.vault.getAbstractFileByPath(newPath)) {
+
+    // Under the INT-020 nested layout the project lives in a folder named after
+    // it (`<dir>/<Old>/`); a rename renames that folder AND the note + tasks folder
+    // inside it. A legacy flat note (`<dir>/<Old>.md`) renames in place.
+    const oldProjectFolder = parentDirOf(oldPath)
+    const nested = !!oldProjectFolder && fileNameFromPath(oldProjectFolder) === oldName
+    const filedUnder = nested ? parentDirOf(oldProjectFolder) : oldProjectFolder
+    const newProjectFolder = nested
+      ? normalizePath(filedUnder ? `${filedUnder}/${safeName}` : safeName)
+      : oldProjectFolder
+    const newPath = normalizePath(
+      nested
+        ? `${newProjectFolder}/${safeName}.md`
+        : oldProjectFolder
+          ? `${oldProjectFolder}/${safeName}.md`
+          : `${safeName}.md`
+    )
+
+    // Collide on the whole per-project folder (nested) or the note (legacy flat).
+    const collisionTarget = nested ? newProjectFolder : newPath
+    if (this.app.vault.getAbstractFileByPath(collisionTarget)) {
       throw new Error(`A note named "${safeName}" already exists.`)
     }
 
@@ -991,8 +1119,35 @@ export class ProjectStore implements TaskSource {
     this.markSelfWrite(oldTaskFolder)
     this.markSelfWrite(newTaskFolder)
 
-    const file = this.app.vault.getAbstractFileByPath(oldPath)
-    if (file instanceof TFile) await this.app.fileManager.renameFile(file, newPath)
+    if (nested) {
+      this.markSelfWrite(oldProjectFolder)
+      this.markSelfWrite(newProjectFolder)
+      // 1. Rename the note in place: `<Old>/<Old>.md` → `<Old>/<safeName>.md`.
+      const interimNote = normalizePath(`${oldProjectFolder}/${safeName}.md`)
+      const noteFile = this.app.vault.getAbstractFileByPath(oldPath)
+      if (noteFile instanceof TFile && interimNote !== oldPath) {
+        this.markSelfWrite(interimNote)
+        await this.app.fileManager.renameFile(noteFile, interimNote)
+      }
+      // 2. Rename the tasks folder in place: `<Old>/<Old>_tasks` → `<Old>/<safeName>_tasks`.
+      const interimTaskFolder = normalizePath(`${oldProjectFolder}/${safeName}_tasks`)
+      const tasksFolder = this.app.vault.getAbstractFileByPath(oldTaskFolder)
+      if (
+        tasksFolder instanceof TFolder &&
+        interimTaskFolder !== oldTaskFolder &&
+        !this.app.vault.getAbstractFileByPath(interimTaskFolder)
+      ) {
+        this.markSelfWrite(interimTaskFolder)
+        await this.app.fileManager.renameFile(tasksFolder, interimTaskFolder)
+      }
+      // 3. Rename the per-project folder itself, carrying note + tasks + freeform.
+      const projectFolder = this.app.vault.getAbstractFileByPath(oldProjectFolder)
+      if (projectFolder instanceof TFolder) await this.app.fileManager.renameFile(projectFolder, newProjectFolder)
+    } else {
+      const noteFile = this.app.vault.getAbstractFileByPath(oldPath)
+      if (noteFile instanceof TFile) await this.app.fileManager.renameFile(noteFile, newPath)
+    }
+
     await this.rebindRenamedProject(project, oldPath, newPath, oldTaskFolder, newTaskFolder, newTitle)
   }
 
@@ -1015,6 +1170,42 @@ export class ProjectStore implements TaskSource {
     if (targetDir === normalizePath(this.projectDirectory(project))) return
 
     const baseName = fileNameFromPath(oldPath)
+    const oldProjectFolder = parentDirOf(oldPath)
+    const nested = !!oldProjectFolder && fileNameFromPath(oldProjectFolder) === baseName
+
+    if (nested) {
+      // INT-020: relocate the WHOLE per-project folder `<oldDir>/<Name>/` →
+      // `<newDir>/<Name>/` (note + `<Name>_tasks/` + any freeform content) via a
+      // single recursive folder rename (R36).
+      const newProjectFolder = normalizePath(targetDir ? `${targetDir}/${baseName}` : baseName)
+      const newPath = normalizePath(`${newProjectFolder}/${baseName}.md`)
+      if (newPath === oldPath) return
+      if (this.app.vault.getAbstractFileByPath(newProjectFolder)) {
+        throw new Error(`A folder named "${baseName}" already exists in "${targetDir}".`)
+      }
+      const oldTaskFolder = normalizePath(oldPath.replace(/\.md$/, '_tasks'))
+      const newTaskFolder = normalizePath(newPath.replace(/\.md$/, '_tasks'))
+      // Self-mark every path we're about to touch, before any write, so the whole
+      // move lands inside one suppression window (no echo loop).
+      this.markSelfWrite(oldPath)
+      this.markSelfWrite(newPath)
+      this.markSelfWrite(oldTaskFolder)
+      this.markSelfWrite(newTaskFolder)
+      this.markSelfWrite(oldProjectFolder)
+      this.markSelfWrite(newProjectFolder)
+
+      await this.ensureFolder(targetDir)
+      const folder = this.app.vault.getAbstractFileByPath(oldProjectFolder)
+      if (folder instanceof TFolder) await this.app.fileManager.renameFile(folder, newProjectFolder)
+      // Keep the declared `path` aligned with the new filed-under directory before
+      // the rebind persists it (rebind re-derives `path` from the new note path).
+      project.path = targetDir
+      await this.rebindRenamedProject(project, oldPath, newPath, oldTaskFolder, newTaskFolder, project.title)
+      return
+    }
+
+    // Legacy flat layout: move the `.md` file and let the rebind cascade its
+    // sibling `<Name>_tasks/` folder.
     const newPath = normalizePath(targetDir ? `${targetDir}/${baseName}.md` : `${baseName}.md`)
     if (newPath === oldPath) return
     if (this.app.vault.getAbstractFileByPath(newPath)) {
@@ -1023,8 +1214,6 @@ export class ProjectStore implements TaskSource {
 
     const oldTaskFolder = normalizePath(oldPath.replace(/\.md$/, '_tasks'))
     const newTaskFolder = normalizePath(newPath.replace(/\.md$/, '_tasks'))
-    // Self-mark every path we're about to touch, before any write, so the whole
-    // move lands inside one suppression window (no echo loop, mirroring renameProject).
     this.markSelfWrite(oldPath)
     this.markSelfWrite(newPath)
     this.markSelfWrite(oldTaskFolder)
@@ -1033,8 +1222,6 @@ export class ProjectStore implements TaskSource {
     await this.ensureFolder(targetDir)
     const file = this.app.vault.getAbstractFileByPath(oldPath)
     if (file instanceof TFile) await this.app.fileManager.renameFile(file, newPath)
-    // Keep the declared `path` aligned with the new directory before the rebind
-    // persists it (rebindRenamedProject only re-derives `path` when it is defined).
     project.path = targetDir
     await this.rebindRenamedProject(project, oldPath, newPath, oldTaskFolder, newTaskFolder, project.title)
   }
@@ -1118,9 +1305,10 @@ export class ProjectStore implements TaskSource {
 
     project.title = newTitle
     project.filePath = newPath
-    // Keep the declared `path` frontmatter aligned with the file's actual parent
-    // folder when the item moved directories; a same-folder rename leaves it be.
-    if (project.path !== undefined) project.path = parentDirOf(newPath)
+    // Keep the declared `path` frontmatter aligned with the directory the project
+    // is filed under (INT-020: the parent of the per-project folder, not the note's
+    // immediate parent) when the item moved; a same-folder rename leaves it be.
+    if (project.path !== undefined) project.path = this.filedUnderDir(newPath)
 
     if (dirty) this.dirtyTasks.set(newPath, dirty)
     if (queue) this.saveQueues.set(newPath, queue)

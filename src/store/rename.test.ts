@@ -35,16 +35,17 @@ describe('ProjectStore.renameProject (outbound)', () => {
 
     await store.renameProject(project, 'Delta')
 
-    expect(vault.getAbstractFileByPath('Projects/Delta.md')).toBeInstanceOf(TFile)
-    expect(vault.getAbstractFileByPath('Projects/Gamma.md')).toBeNull()
-    expect(vault.getAbstractFileByPath('Projects/Delta_tasks')).toBeInstanceOf(TFolder)
-    expect(vault.getAbstractFileByPath('Projects/Gamma_tasks')).toBeNull()
+    // INT-020 nested layout: the per-project folder, the note, and the tasks folder all rename.
+    expect(vault.getAbstractFileByPath('Projects/Delta/Delta.md')).toBeInstanceOf(TFile)
+    expect(vault.getAbstractFileByPath('Projects/Gamma/Gamma.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Delta/Delta_tasks')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Gamma/Gamma_tasks')).toBeNull()
 
     // Memory rebound: identity, title, and the task's filePath follow the folder.
-    expect(project.filePath).toBe('Projects/Delta.md')
+    expect(project.filePath).toBe('Projects/Delta/Delta.md')
     expect(project.title).toBe('Delta')
     expect(project.tasks).toHaveLength(1)
-    expect(project.tasks[0].filePath?.startsWith('Projects/Delta_tasks/')).toBe(true)
+    expect(project.tasks[0].filePath?.startsWith('Projects/Delta/Delta_tasks/')).toBe(true)
     // The moved task file exists at its new location.
     expect(vault.getAbstractFileByPath(project.tasks[0].filePath ?? '')).toBeInstanceOf(TFile)
   })
@@ -53,7 +54,7 @@ describe('ProjectStore.renameProject (outbound)', () => {
     const { store, vault } = newStore()
     const project = await store.createProject('Gamma', 'Projects')
     await store.renameProject(project, 'Delta')
-    const fm = await fmOf(vault, 'Projects/Delta.md')
+    const fm = await fmOf(vault, 'Projects/Delta/Delta.md')
     expect(fm.title).toBe('Delta')
   })
 
@@ -61,8 +62,8 @@ describe('ProjectStore.renameProject (outbound)', () => {
     const { store } = newStore()
     const project = await store.createProject('Iota', 'Projects')
     await store.renameProject(project, 'Kappa')
-    expect(store.consumeSelfWrite('Projects/Kappa.md')).toBe(true)
-    expect(store.consumeSelfWrite('Projects/Iota.md')).toBe(true)
+    expect(store.consumeSelfWrite('Projects/Kappa/Kappa.md')).toBe(true)
+    expect(store.consumeSelfWrite('Projects/Iota/Iota.md')).toBe(true)
   })
 
   it('throws when the target name is already taken and leaves the project unchanged', async () => {
@@ -71,8 +72,8 @@ describe('ProjectStore.renameProject (outbound)', () => {
     await store.createProject('Dst', 'Projects')
 
     await expect(store.renameProject(project, 'Dst')).rejects.toThrow(/already exists/)
-    expect(project.filePath).toBe('Projects/Src.md')
-    expect(vault.getAbstractFileByPath('Projects/Src.md')).toBeInstanceOf(TFile)
+    expect(project.filePath).toBe('Projects/Src/Src.md')
+    expect(vault.getAbstractFileByPath('Projects/Src/Src.md')).toBeInstanceOf(TFile)
   })
 })
 
@@ -86,13 +87,14 @@ describe('ProjectStore.handleExternalRename (inbound)', () => {
     expect(project).not.toBeNull()
     if (!project) return
 
-    await vault.rename(fileAt(vault, 'Projects/Alpha.md'), 'Projects/Beta.md')
-    await store.handleExternalRename('Projects/Alpha.md', fileAt(vault, 'Projects/Beta.md'))
+    // INT-020 nested layout: the note is renamed in place inside its per-project folder.
+    await vault.rename(fileAt(vault, 'Projects/Alpha/Alpha.md'), 'Projects/Alpha/Beta.md')
+    await store.handleExternalRename('Projects/Alpha/Alpha.md', fileAt(vault, 'Projects/Alpha/Beta.md'))
 
     expect(project.title).toBe('Beta')
-    expect(project.filePath).toBe('Projects/Beta.md')
+    expect(project.filePath).toBe('Projects/Alpha/Beta.md')
     // Persisted title is in sync too.
-    expect((await fmOf(vault, 'Projects/Beta.md')).title).toBe('Beta')
+    expect((await fmOf(vault, 'Projects/Alpha/Beta.md')).title).toBe('Beta')
   })
 
   it('cascades the _tasks folder rename so tasks stay attached', async () => {
@@ -102,14 +104,15 @@ describe('ProjectStore.handleExternalRename (inbound)', () => {
     if (!project) throw new Error('project failed to load')
     await store.insertTask(project, makeTask({ title: 'attached' }))
 
-    // Only the .md is renamed externally; the folder still carries the old name.
-    await vault.rename(fileAt(vault, 'Projects/Eta.md'), 'Projects/Theta.md')
-    await store.handleExternalRename('Projects/Eta.md', fileAt(vault, 'Projects/Theta.md'))
+    // Only the note .md is renamed externally (in place, inside its per-project
+    // folder); the tasks folder still carries the old name and must cascade.
+    await vault.rename(fileAt(vault, 'Projects/Eta/Eta.md'), 'Projects/Eta/Theta.md')
+    await store.handleExternalRename('Projects/Eta/Eta.md', fileAt(vault, 'Projects/Eta/Theta.md'))
 
     expect(project.tasks).toHaveLength(1)
-    expect(project.tasks[0].filePath?.startsWith('Projects/Theta_tasks/')).toBe(true)
-    expect(vault.getAbstractFileByPath('Projects/Theta_tasks')).toBeInstanceOf(TFolder)
-    expect(vault.getAbstractFileByPath('Projects/Eta_tasks')).toBeNull()
+    expect(project.tasks[0].filePath?.startsWith('Projects/Eta/Theta_tasks/')).toBe(true)
+    expect(vault.getAbstractFileByPath('Projects/Eta/Theta_tasks')).toBeInstanceOf(TFolder)
+    expect(vault.getAbstractFileByPath('Projects/Eta/Eta_tasks')).toBeNull()
   })
 
   it('ignores the echo of a plugin-initiated rename (self-marked new path)', async () => {
@@ -119,9 +122,9 @@ describe('ProjectStore.handleExternalRename (inbound)', () => {
     await store.renameProject(project, 'Nu')
     // The store now tracks the project at Nu.md; a second (echo) call must no-op.
     const titleBefore = project.title
-    await store.handleExternalRename('Projects/Mu.md', fileAt(vault, 'Projects/Nu.md'))
+    await store.handleExternalRename('Projects/Mu/Mu.md', fileAt(vault, 'Projects/Nu/Nu.md'))
     expect(project.title).toBe(titleBefore)
-    expect(project.filePath).toBe('Projects/Nu.md')
+    expect(project.filePath).toBe('Projects/Nu/Nu.md')
   })
 
   it('is a no-op when the old path resolves to no loaded item', async () => {
@@ -141,14 +144,15 @@ describe('ProjectStore.handleExternalRename (inbound)', () => {
     if (!project) throw new Error('project failed to load')
     await store.insertTask(project, makeTask({ title: 'kid' }))
 
-    await vault.rename(fileAt(vault, 'Projects/Move.md'), 'Areas/Ops/Move.md')
-    await store.handleExternalRename('Projects/Move.md', fileAt(vault, 'Areas/Ops/Move.md'))
+    // INT-020: the whole nested note moves to a new filed-under directory.
+    await vault.rename(fileAt(vault, 'Projects/Move/Move.md'), 'Areas/Ops/Move/Move.md')
+    await store.handleExternalRename('Projects/Move/Move.md', fileAt(vault, 'Areas/Ops/Move/Move.md'))
 
-    expect(project.filePath).toBe('Areas/Ops/Move.md')
+    expect(project.filePath).toBe('Areas/Ops/Move/Move.md')
     expect(project.path).toBe('Areas/Ops')
-    expect((await fmOf(vault, 'Areas/Ops/Move.md')).path).toBe('Areas/Ops')
-    expect(vault.getAbstractFileByPath('Areas/Ops/Move_tasks')).toBeInstanceOf(TFolder)
-    expect(project.tasks[0].filePath?.startsWith('Areas/Ops/Move_tasks/')).toBe(true)
+    expect((await fmOf(vault, 'Areas/Ops/Move/Move.md')).path).toBe('Areas/Ops')
+    expect(vault.getAbstractFileByPath('Areas/Ops/Move/Move_tasks')).toBeInstanceOf(TFolder)
+    expect(project.tasks[0].filePath?.startsWith('Areas/Ops/Move/Move_tasks/')).toBe(true)
   })
 
   it('rebinds a renamed task file (filePath + title)', async () => {
@@ -161,7 +165,7 @@ describe('ProjectStore.handleExternalRename (inbound)', () => {
     const oldTaskPath = project.tasks[0].filePath ?? ''
     expect(oldTaskPath).not.toBe('')
 
-    const newTaskPath = 'Projects/Tsk_tasks/renamed.md'
+    const newTaskPath = 'Projects/Tsk/Tsk_tasks/renamed.md'
     await vault.rename(fileAt(vault, oldTaskPath), newTaskPath)
     await store.handleExternalRename(oldTaskPath, fileAt(vault, newTaskPath))
 
@@ -178,8 +182,8 @@ describe('ProjectStore.handleExternalRename (inbound)', () => {
     await store.insertTask(project, makeTask({ title: 'live' }))
     const oldTaskPath = project.tasks[0].filePath ?? ''
 
-    await store.ensureFolder('Projects/Arc_tasks/Archive')
-    const archivedPath = 'Projects/Arc_tasks/Archive/live.md'
+    await store.ensureFolder('Projects/Arc/Arc_tasks/Archive')
+    const archivedPath = 'Projects/Arc/Arc_tasks/Archive/live.md'
     await vault.rename(fileAt(vault, oldTaskPath), archivedPath)
     await store.handleExternalRename(oldTaskPath, fileAt(vault, archivedPath))
 
@@ -196,7 +200,7 @@ describe('ProjectStore.handleExternalTaskChange', () => {
     const project = await store.loadProject(fileAt(vault, (await store.createProject('Inbox', 'Projects')).filePath))
     if (!project) throw new Error('project failed to load')
 
-    const path = 'Projects/Inbox_tasks/dropped.md'
+    const path = 'Projects/Inbox/Inbox_tasks/dropped.md'
     await vault.create(path, '---\npm-task: true\ntitle: Dropped in\n---\n\nbody')
     const task = await store.handleExternalTaskChange(fileAt(vault, path))
 

@@ -75,6 +75,15 @@ export interface TaskSource {
    */
   moveProject(project: Project, newDir: string): Promise<void>
   /**
+   * Migrate legacy flat-layout projects (`<dir>/<Name>.md` + sibling
+   * `<dir>/<Name>_tasks/`) into the nested per-project-folder layout
+   * (`<dir>/<Name>/…`) via vault rename, preserving the note body + task
+   * association. Idempotent (a no-op when already nested) and re-runnable; runs
+   * automatically on load via `discoverProjects`. With `{ dryRun: true }` it
+   * performs no writes and returns the `{ from, to }` moves that WOULD happen.
+   */
+  migrateLegacyProjects(options?: { dryRun?: boolean }): Promise<Array<{ from: string; to: string }>>
+  /**
    * Map an inbound vault rename (old path → renamed file) onto the loaded item and
    * update its name in memory + persisted title; cascades a project's `<Name>_tasks`
    * folder so tasks stay attached. A no-op when the old path resolves to no loaded item.
