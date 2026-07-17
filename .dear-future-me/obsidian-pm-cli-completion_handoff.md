@@ -167,3 +167,26 @@ are in the compaction summary / vault; match them exactly.
 Re-author the comprehensive intention test (step 1 of RECOVERY PLAN) via the `intention-tests` skill,
 capturing the FULL surface + asserting on rendered printouts. Then reopen INT-019 in dekspec and build
 to 100%. Background workers OK; keep a heartbeat; opus only.
+
+---
+
+## UPDATE 2026-07-17 (session 2) — mid-build, persona-council plan in execution
+
+**The plan is DONE and being executed.** Full plan: `<scratchpad>/cli-plan-final.md` (persona-council synthesis: Grove=verification, Tufte=output-grammar, CLI-architect=McIlroy/Pike/Hamano/Ousterhout). 3 personas authored to the REMOTE personas DB (ids 0065/0066/0067). Remote DB: `FLYWHEEL_VECTOR_SERVER_URL` from `~/.config/flywheel/vector_client.toml` (http://100.70.252.96:8765) + token; personas_db.py dispatches remote when that env is set.
+
+**DONE + committed:**
+- INT-019 REWRITTEN: full verbatim spec embedded in Appendix + sections A–G, no phasing; adversarial grader certified PASS. (43af25e)
+- Render grammar FROZEN — `cli/src/render.ts`: ViewSpec, per-view legend, byte-exact wording, glyph-as-token pretty (scan format, NOT column-aligned), FAITHFUL `--porcelain`/`--ndjson` (PORCELAIN_COLUMNS incl kind/rel/overdue_days/child_count/progress/blocked_by/assignee/priority). Leading glyph = pure status; `⊘ blocked by [id]` is a trailing annotation. **Proven live: `pm today` renders the designed printout vs the 584-file vault, stdout clean.** (b050e08)
+- Store AE-001: `transact()` (batch atomicity) + `shiftTaskDates(cascadeSubtree)` (probe confirmed descendants don't auto-move). 75 store tests green. (b050e08)
+- Injectable clock `ctx.now` (deterministic goldens), `coerce.parseDelta`, flag registry, `explain` wired. (af06b55)
+- `read.ts`: ALL read/nav/list views emit ViewSpec — universal composable `tree` (--sub/--needs/--blocks/--all), today/overdue/open(--by deps)/blocked/next/agenda/deps/path/projects/log/palette/explain/schema, flat find/ls (filters+sort). DONE.
+
+**IN FLIGHT (background opus workers, disjoint files):**
+- a4e9ed5c → create.ts+apply.ts (new --under/import/apply-full/E_CONFLICT)
+- af04b627 → update.ts (set/shift-cascade/note/reorder/dup/rm/reconcile)
+- a6dbca7b → analysis.ts+declarative.ts+live.ts (graph/critical-path/blockers/validate/rollup/export/snapshot/restore/batch/watch)
+Each returns {command→function} exports; LEAD wires run.ts HANDLERS + args (workers do NOT touch spine).
+
+**REMAINING (in order):** (1) integrate worker exports → wire run.ts + any flags; (2) `tsc -p cli/tsconfig.json` clean; (3) build fixture vault + `cli/render.test.ts` = stdout golden snapshots + executable negative controls (link-only→no ✎; no-overdue→zero ⚠) + all-9 exit-code gates + run-twice-determinism; the two-way-traced completeness LEDGER; reclassify old pm.test.ts R41-R46 (they assert on data.*, now red — expected); (4) reuse-thesis lint gate (no processFrontMatter/vault.process in cli/src/commands/**); (5) full oracle: pnpm check + check:submission + tsc cli + test + build; (6) adversarial grader executes the CLI + diffs stdout vs verbatim → zero NOT-DONE + zero unmapped spans; (7) re-lock INT-019 (transition PROPOSED→LOCKED via artifact_ops.py); (8) FINALE (user's order): CLI install on Mac (tsx runner, PM_VAULT=/Users/jeff/Obsidian/secondbrain) → pm-CLI skill via /skill-creator (Obsidian Skills) → Hetzner+Delphi install + /publish-skill-updates → GitHub PR LAST (dekspec-free, sensitivity-gated) → vault docs cleanup.
+
+**Dekspec reopen mechanism:** `python3 ~/.claude/plugins/cache/dekspec/dekspec/0.120.1/skills/_lib/scripts/artifact_ops.py transition <file> --from LOCKED --to PROPOSED --note ... --engineer ...` (bypasses the LOCKED-guard hook).
