@@ -41,6 +41,7 @@ interface StoreProbe {
   discoverProjects?: () => Promise<Project[]>
   projectDirectory?: (project: Project) => string
   isProjectRelevantPath?: (path: string) => boolean
+  migrateLegacyProjects?: (options?: { dryRun?: boolean }) => Promise<unknown>
   moveProject?: (project: Project, newDir: string) => Promise<void>
   renameProject?: (project: Project, newTitle: string) => Promise<void>
   handleExternalRename?: (oldPath: string, file: TFile) => Promise<void>
@@ -1067,5 +1068,237 @@ describe('Feature 6 — agent-authored ID authority', () => {
     expect(String(sepFm.id), 'the path-separator id must be rewritten safely on disk').not.toContain('/')
     const bigFm = await frontmatterOf(vault, bigPath)
     expect(String(bigFm.id).length, 'the oversized id must be trimmed on disk').toBeLessThanOrEqual(64)
+  })
+})
+
+// ─── Feature 7 — project-folder restructure + migration (INT-020, O8, M7) ────
+//
+// Every project now lives in ITS OWN folder so the folder is free for the user's
+// (or an AI's) free-form content. The layout changes from the old flat form —
+//   <path>/<Name>.md              (project note)
+//   <path>/<Name>_tasks/          (tasks, a SIBLING of the note)
+// to the new nested form —
+//   <path>/<Name>/                (the per-project folder — free for freeform content)
+//   <path>/<Name>/<Name>.md       (the project note, inside its folder)
+//   <path>/<Name>/<Name>_tasks/   (the tasks folder, moved one level DOWN, name unchanged)
+//
+// Pinned `path` contract (routing/WS): the `path` frontmatter key keeps its
+// INT-014 meaning — the vault-relative directory the project is FILED UNDER, i.e.
+// the directory that CONTAINS the per-project folder. So for `path: <dir>` and a
+// project titled `<Name>`, the folder is `<dir>/<Name>/`, the note is
+// `<dir>/<Name>/<Name>.md`, and the tasks are `<dir>/<Name>/<Name>_tasks/`.
+// `projectDirectory(project)` still resolves to `<dir>` (unchanged from INT-014
+// R8/R10/R11 — the `_tasks` folder name is NOT renamed, it only moves down one
+// level). Blank/absent `path` falls back to the directory that contains the
+// per-project folder (consistent with the INT-014 parent-folder fallback).
+//
+// Migration is idempotent and runs on load: a legacy flat-layout project
+// (`<dir>/<Name>.md` + sibling `<dir>/<Name>_tasks/`) is relocated into the new
+// nested layout via vault rename (so Obsidian updates links), preserving the
+// project-note body, task association, and any existing content; a project
+// already in the nested layout is left untouched (no-op).
+//
+// These requirements drive `store.createProject`, `store.discoverProjects` (the
+// on-load migration entrypoint), and `store.moveProject` — all of which already
+// exist, so the RED failures below are ASSERTION failures against the not-yet-
+// existent nested layout, never crashes.
+
+describe('Feature 7 — project-folder restructure', () => {
+  it('R33: createProject produces the nested per-project-folder layout', async () => {
+    // negative-control: files created in the OLD flat layout — the note at
+    // `<dir>/<Name>.md` with a SIBLING `<dir>/<Name>_tasks/`, leaving no
+    // per-project folder for the user's free-form content.
+    const { store, vault } = newStore()
+    const project = await store.createProject('Nested Home', 'Areas/Ops')
+
+    // Forensic: the project note + its `<Name>_tasks` folder both live INSIDE the
+    // new per-project folder `Areas/Ops/Nested Home/`.
+    expect(
+      vault.getAbstractFileByPath('Areas/Ops/Nested Home/Nested Home.md'),
+      'the project note must live inside its own per-project folder'
+    ).toBeInstanceOf(TFile)
+    expect(
+      vault.getAbstractFileByPath('Areas/Ops/Nested Home/Nested Home_tasks'),
+      'the tasks folder must be nested one level down, inside the per-project folder'
+    ).toBeInstanceOf(TFolder)
+
+    // The note must NOT be written in the old flat layout.
+    expect(
+      vault.getAbstractFileByPath('Areas/Ops/Nested Home.md'),
+      'the project note must not be written in the old flat layout'
+    ).toBeNull()
+
+    // The `path` frontmatter keeps its INT-014 meaning: the directory the project
+    // is filed under (which CONTAINS the per-project folder), and
+    // `projectDirectory` resolves to it.
+    const fm = await frontmatterOf(vault, project.filePath)
+    expect(fm.path, 'path frontmatter is the directory containing the per-project folder').toBe('Areas/Ops')
+    const directoryOf = probe(store).projectDirectory
+    expect(directoryOf).toBeTypeOf('function')
+    if (!directoryOf) return
+    expect(directoryOf.call(store, project)).toBe('Areas/Ops')
+  })
+
+  it('R34: a legacy flat-layout project is migrated to the nested layout on load', async () => {
+    // negative-control: the legacy project is left un-migrated (note + sibling
+    // tasks folder stay at the old flat paths), or its tasks / project-note body
+    // are lost during the move.
+    const { store, vault } = newStore()
+    // Seed a legacy flat-layout project: note with a free-form body + one task in
+    // the SIBLING `_tasks` folder.
+    await vault.create(
+      'Projects/Legacy Proj.md',
+      taskFileBody([
+        '---',
+        'pm-project: true',
+        'id: legacy-proj-1',
+        'title: Legacy Proj',
+        'path: Projects',
+        'taskIds:',
+        '  - lt-1',
+        '---',
+        '',
+        'Freeform project body kept across the migration.'
+      ])
+    )
+    await vault.createFolder('Projects/Legacy Proj_tasks')
+    await vault.create(
+      'Projects/Legacy Proj_tasks/lt-1.md',
+      taskFileBody(['---', 'pm-task: true', 'id: lt-1', 'title: Legacy Task', '---', '', 'task body'])
+    )
+
+    // Migration runs on load: discovery is the vault-wide load entrypoint.
+    const discover = probe(store).discoverProjects
+    expect(discover, 'ProjectStore.discoverProjects() must exist').toBeTypeOf('function')
+    if (!discover) return
+    await discover.call(store)
+
+    // Forensic: the project note + its task file now live in the NESTED layout,
+    // and nothing remains at the old flat locations.
+    const migratedNote = vault.getAbstractFileByPath('Projects/Legacy Proj/Legacy Proj.md')
+    expect(migratedNote, 'the project note must be relocated into its own per-project folder').toBeInstanceOf(TFile)
+    expect(
+      vault.getAbstractFileByPath('Projects/Legacy Proj/Legacy Proj_tasks/lt-1.md'),
+      'the task file must move with the project into the nested `_tasks` folder'
+    ).toBeInstanceOf(TFile)
+    expect(
+      vault.getAbstractFileByPath('Projects/Legacy Proj.md'),
+      'nothing must remain at the old flat note path'
+    ).toBeNull()
+    expect(
+      vault.getAbstractFileByPath('Projects/Legacy Proj_tasks'),
+      'nothing must remain at the old flat sibling tasks folder'
+    ).toBeNull()
+
+    // The migration is content-preserving: the project-note body and the task
+    // association survive. (Early-return guard so a missing file fails the
+    // instanceof assertion above rather than crashing the read below.)
+    if (!(migratedNote instanceof TFile)) return
+    const noteContent = await vault.cachedRead(migratedNote)
+    expect(noteContent, 'the project-note body must be preserved across the migration').toContain(
+      'Freeform project body kept across the migration.'
+    )
+    const fm = parseFrontmatter(noteContent).frontmatter ?? {}
+    const taskIds = Array.isArray(fm.taskIds) ? (fm.taskIds as unknown[]).map(String) : []
+    expect(taskIds, 'the task association (taskIds ordering) must be preserved').toContain('lt-1')
+  })
+
+  it('R35: tasks still associate (folder-based) after the restructure', async () => {
+    // negative-control: tasks are lost because path-matching still expects the old
+    // SIBLING `<dir>/<Name>_tasks/` location instead of the nested one.
+    const { store, vault } = newStore()
+    await vault.create(
+      'Projects/Assoc Proj.md',
+      taskFileBody([
+        '---',
+        'pm-project: true',
+        'id: assoc-proj-1',
+        'title: Assoc Proj',
+        'path: Projects',
+        'taskIds:',
+        '  - at-1',
+        '---',
+        '',
+        'body'
+      ])
+    )
+    await vault.createFolder('Projects/Assoc Proj_tasks')
+    await vault.create(
+      'Projects/Assoc Proj_tasks/at-1.md',
+      taskFileBody(['---', 'pm-task: true', 'id: at-1', 'title: Assoc Task', '---', '', 'task body'])
+    )
+
+    const discover = probe(store).discoverProjects
+    expect(discover).toBeTypeOf('function')
+    if (!discover) return
+    const found = await discover.call(store)
+
+    // The migrated project is discovered, and its task loads into the tree —
+    // folder-based association survived the restructure.
+    const proj = found.find((p) => p.title === 'Assoc Proj')
+    expect(proj, 'the migrated project must be discovered').toBeDefined()
+    if (!proj) return
+    const task = findTask(proj.tasks, 'at-1')
+    expect(task, 'the task must still associate with its project after the restructure').toBeDefined()
+
+    // And it resolves against the NESTED `_tasks` folder, not the old sibling one.
+    expect(task?.filePath ?? '', 'the task must resolve under the nested `_tasks` folder').toMatch(
+      /^Projects\/Assoc Proj\/Assoc Proj_tasks\//
+    )
+    // Forensic on disk: the task file physically lives under the nested folder.
+    expect(
+      vault.getAbstractFileByPath('Projects/Assoc Proj/Assoc Proj_tasks/at-1.md'),
+      'the task file must be relocated under the nested tasks folder'
+    ).toBeInstanceOf(TFile)
+  })
+
+  it('R36: moveProject moves the entire project folder (note + tasks + freeform content)', async () => {
+    // negative-control: only the note (and maybe the tasks folder) moves, leaving
+    // the per-project folder's free-form content behind at the old location.
+    const { store, vault } = newStore()
+    const created = await store.createProject('Movable', 'Projects')
+    const project = await store.loadProject(fileAt(vault, created.filePath))
+    expect(project).not.toBeNull()
+    if (!project) return
+    await store.insertTask(project, makeTask({ title: 'line item' }))
+
+    // Free-form content the user (or an AI) dropped INTO the per-project folder.
+    await vault.create('Projects/Movable/reference.md', taskFileBody(['# Reference', 'user free-form content']))
+
+    const move = probe(store).moveProject
+    expect(move, 'ProjectStore.moveProject(project, newDir) must exist').toBeTypeOf('function')
+    if (!move) return
+    await move.call(store, project, 'Areas/Portfolio')
+
+    // Forensic: the WHOLE per-project folder relocated under the new directory —
+    // the note, the `_tasks` folder, AND the free-form content.
+    expect(
+      vault.getAbstractFileByPath('Areas/Portfolio/Movable/Movable.md'),
+      'the project note must move with its per-project folder'
+    ).toBeInstanceOf(TFile)
+    expect(
+      vault.getAbstractFileByPath('Areas/Portfolio/Movable/Movable_tasks'),
+      'the nested tasks folder must move with the per-project folder'
+    ).toBeInstanceOf(TFolder)
+    expect(
+      vault.getAbstractFileByPath('Areas/Portfolio/Movable/reference.md'),
+      'the free-form content inside the per-project folder must move too'
+    ).toBeInstanceOf(TFile)
+
+    // Nothing left behind at the old per-project folder.
+    expect(vault.getAbstractFileByPath('Projects/Movable/Movable.md')).toBeNull()
+    expect(vault.getAbstractFileByPath('Projects/Movable/reference.md')).toBeNull()
+
+    // The task moved with the folder (not orphaned at the old path).
+    const movedTaskPath = project.tasks[0]?.filePath ?? ''
+    expect(movedTaskPath.startsWith('Areas/Portfolio/Movable/Movable_tasks/')).toBe(true)
+
+    // The persisted `path` frontmatter + resolved directory track the new dir.
+    const fm = await frontmatterOf(vault, project.filePath)
+    expect(fm.path).toBe('Areas/Portfolio')
+    const directoryOf = probe(store).projectDirectory
+    expect(directoryOf).toBeTypeOf('function')
+    if (!directoryOf) return
+    expect(directoryOf.call(store, project)).toBe('Areas/Portfolio')
   })
 })

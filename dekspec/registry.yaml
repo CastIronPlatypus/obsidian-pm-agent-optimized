@@ -124,3 +124,18 @@ entries:
   slug: view-orchestration
   allocated: '2026-07-16'
   allocated_by: git-conflict
+- kind: INT
+  id: INT-020
+  slug: project-folder-restructure
+  allocated: '2026-07-16'
+  allocated_by: manual
+- kind: WS
+  id: WS-007
+  slug: project-folder-restructure
+  allocated: '2026-07-16'
+  allocated_by: manual
+- kind: IB
+  id: IB-007
+  slug: project-folder-restructure
+  allocated: '2026-07-16'
+  allocated_by: manual

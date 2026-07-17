@@ -13,3 +13,4 @@ _None yet — author the first one with `/write-ws`._
 | [WS-004](working-specs/WS-004-calendar-date-picker.md) | CalendarPicker date-entry primitive | ACCEPTED | AE-011, AE-005 | 2026-07-16 | 2026-07-16 |
 | [WS-005](working-specs/WS-005-self-describing-palettes.md) | Self-describing status/priority palettes | ACCEPTED | AE-001 | 2026-07-16 | 2026-07-16 |
 | [WS-006](working-specs/WS-006-agent-authored-id-authority.md) | Agent-authored ID authority on cold load | ACCEPTED | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
+| [WS-007](working-specs/WS-007-project-folder-restructure.md) | Project-folder restructure + legacy migration | ACCEPTED | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
