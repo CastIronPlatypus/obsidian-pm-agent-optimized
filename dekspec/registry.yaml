@@ -139,3 +139,18 @@ entries:
   slug: project-folder-restructure
   allocated: '2026-07-16'
   allocated_by: manual
+- kind: INT
+  id: INT-021
+  slug: parent-backlinks-content-detection
+  allocated: '2026-07-16'
+  allocated_by: manual
+- kind: WS
+  id: WS-008
+  slug: parent-backlinks-content-detection
+  allocated: '2026-07-16'
+  allocated_by: manual
+- kind: IB
+  id: IB-008
+  slug: parent-backlinks-content-detection
+  allocated: '2026-07-16'
+  allocated_by: manual

@@ -8,6 +8,7 @@ _None yet — author the first one with `/write-intent`._
 | Intent | Title | Type | Autonomy | Status | Linked AEs | Created | Modified |
 |---|---|---|---|---|---|---|---|
 | [INT-020](intents/INT-020-project-folder-restructure.md) | Give each project its own folder (nested layout) and migrate legacy projects on load | feature |  | IMPLEMENTING | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
+| [INT-021](intents/INT-021-parent-backlinks-content-detection.md) | Write live parent backlinks into item bodies and add a content-aware "has real content" detector | feature |  | IMPLEMENTING | AE-001 | 2026-07-16 | 2026-07-16 |
 
 ## Archive
 

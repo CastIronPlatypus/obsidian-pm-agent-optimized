@@ -45,6 +45,9 @@ interface StoreProbe {
   moveProject?: (project: Project, newDir: string) => Promise<void>
   renameProject?: (project: Project, newTitle: string) => Promise<void>
   handleExternalRename?: (oldPath: string, file: TFile) => Promise<void>
+  // Feature 8 (INT-021) — content-aware detection.
+  hasBodyContent?: (file: TFile) => Promise<boolean> | boolean
+  bodyContentLines?: (file: TFile) => Promise<number> | number
 }
 
 function newStore(): { store: ProjectStore; vault: FakeVault; app: App } {
@@ -1300,5 +1303,208 @@ describe('Feature 7 — project-folder restructure', () => {
     expect(directoryOf).toBeTypeOf('function')
     if (!directoryOf) return
     expect(directoryOf.call(store, project)).toBe('Areas/Portfolio')
+  })
+})
+
+// ─── Feature 8 — parent backlinks in body + content detection (INT-021, O9, M8) ─
+//
+// Two coupled, additive, always-on capabilities so a human and an AI agent can
+// co-manage projects as a connected Obsidian graph of plain notes:
+//
+// 1. PARENT BACKLINKS IN BODY. On create, the store writes a LIVE Obsidian
+//    `[[wikilink]]` to the item's IMMEDIATE parent into the note BODY — a task
+//    links its milestone / parent task / project; a milestone links its project /
+//    parent milestone. This is IN ADDITION to the existing frontmatter parent refs
+//    (`parentId` / `projectId`) — additive, never replacing, cannot be disabled —
+//    so the user's graph view shows projects/tasks as connected notes. The link is
+//    written on a recognizable line carrying a SENTINEL so the content detector can
+//    exclude it while the `[[link]]` stays plainly visible and graph-indexable.
+//
+// 2. CONTENT-AWARE DETECTION (the "has real content" signal the CLI's `✎N` symbol
+//    uses). A store-level helper reports whether a note has real body content
+//    BEYOND its frontmatter AND beyond the managed auto-link line(s), plus a
+//    line-count size hint. The managed auto-link must NOT count as content, else
+//    every managed note lights up and the signal is useless.
+//
+// Pinned mechanism (routing/WS contract): the managed backlink is written on a
+// line ending in the SENTINEL `<!-- pm:link -->` (e.g. `Part of [[<Parent>]]
+// <!-- pm:link -->`) at the top of the body. Detection strips the frontmatter and
+// any `<!-- pm:link -->`-marked line(s), then inspects the remainder:
+//   - hasBodyContent(file)  → true iff a non-blank line survives that stripping.
+//   - bodyContentLines(file) → the count of non-blank lines that survive it
+//     (frontmatter + managed link line(s) excluded).
+// Build-time note flagged to the implementer: verify the HTML-comment sentinel
+// does NOT suppress Obsidian graph indexing of the `[[link]]`; if it does, move
+// the marker rather than wrap the link.
+//
+// These requirements drive `store.createProject` / `store.insertTask` (which
+// already exist, so RED failures are ASSERTION failures against the not-yet-
+// written sentinel-marked backlink, never crashes) and probe two new optional
+// store surfaces (`hasBodyContent` / `bodyContentLines`), feature-detected with
+// `toBeTypeOf('function')` so their absence fails an assertion rather than
+// crashing.
+
+/** The sentinel that marks the store-managed backlink line so detection can exclude it. */
+const LINK_SENTINEL = '<!-- pm:link -->'
+
+/** The note body (frontmatter stripped) at a given vault path. */
+async function bodyOf(vault: FakeVault, path: string): Promise<string> {
+  const content = await vault.cachedRead(fileAt(vault, path))
+  return parseFrontmatter(content).body
+}
+
+/** The basename (no directory, no `.md`) a wikilink would target for a file path. */
+function basenameOf(filePath: string | undefined): string {
+  return (filePath ?? '').replace(/^.*\//, '').replace(/\.md$/, '')
+}
+
+/** The first body line carrying the managed-link sentinel, or undefined if none. */
+function managedLinkLine(body: string): string | undefined {
+  return body.split('\n').find((l) => l.includes(LINK_SENTINEL))
+}
+
+/** The `[[target]]` / `[[target|alias]]` targets on a single line (alias stripped). */
+function wikilinkTargets(line: string): string[] {
+  const out: string[] = []
+  const re = /\[\[([^\]]+)\]\]/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(line)) !== null) out.push((m[1].split('|')[0] ?? '').trim())
+  return out
+}
+
+describe('Feature 8 — parent backlinks + content detection', () => {
+  it('R37: creating a task under a milestone writes a sentinel-marked live backlink to the parent, additive to frontmatter', async () => {
+    // negative-control: NO body link is written — only the frontmatter `parentId`
+    // carries the parent ref, so the user's Obsidian graph shows the task as an
+    // unconnected orphan note (the whole point of the feature is a live [[link]]).
+    const { store, vault } = newStore()
+    const project = await store.createProject('Roadmap', 'Projects')
+    const milestone = makeTask({ title: 'Launch Milestone', type: 'milestone' })
+    await store.insertTask(project, milestone)
+    const child = makeTask({ title: 'Write the copy' })
+    await store.insertTask(project, child, milestone.id)
+
+    // The frontmatter parent ref is unchanged — the body link is ADDITIVE, not a
+    // replacement.
+    const childPath = child.filePath
+    expect(childPath, 'the inserted task must have a persisted file path').toBeTruthy()
+    if (!childPath) return
+    const fm = await frontmatterOf(vault, childPath)
+    expect(fm.parentId, 'the frontmatter parent ref must stay — the body backlink is additive').toBe(milestone.id)
+
+    // Forensic: the body carries a sentinel-marked managed backlink whose live
+    // [[wikilink]] targets the IMMEDIATE parent (the milestone).
+    const line = managedLinkLine(await bodyOf(vault, childPath))
+    expect(line, `the task body must carry a managed backlink line marked with ${LINK_SENTINEL}`).toBeTruthy()
+    if (!line) return
+    expect(
+      wikilinkTargets(line),
+      'the managed backlink must be a live [[wikilink]] to the immediate parent milestone'
+    ).toContain(basenameOf(milestone.filePath))
+  })
+
+  it('R38: the content-detector excludes the managed auto-link — a note that is only the backlink reads as no real content; real prose flips it true', async () => {
+    // negative-control: the managed auto-link is COUNTED as content, so every
+    // freshly-created managed note reads as "has content" and the CLI's ✎ signal
+    // becomes useless noise (a bare note lights up).
+    const { store, vault } = newStore()
+    const project = await store.createProject('Detect', 'Projects')
+    // No description → the body is only the managed backlink line.
+    const task = makeTask({ title: 'Bare task' })
+    await store.insertTask(project, task)
+    expect(task.filePath, 'the inserted task must have a persisted file path').toBeTruthy()
+    if (!task.filePath) return
+
+    const hasContent = probe(store).hasBodyContent
+    expect(hasContent, 'ProjectStore.hasBodyContent(file) must exist').toBeTypeOf('function')
+    if (!hasContent) return
+
+    const file = fileAt(vault, task.filePath)
+    expect(
+      await hasContent.call(store, file),
+      'a note whose body is only the managed backlink has NO real content'
+    ).toBe(false)
+
+    // Add real prose the user/agent wrote; the detector must now report content.
+    await vault.process(file, (c) => `${c}\n\nThis is a real note the user wrote.\n`)
+    expect(await hasContent.call(store, file), 'once real prose is added the detector must report content').toBe(true)
+  })
+
+  it('R39: the size hint counts only real content lines — frontmatter and the managed link line are excluded', async () => {
+    // negative-control: the managed link line (and/or the frontmatter) inflates the
+    // count, so the ✎N size hint overstates how much the note actually holds.
+    const { store, vault } = newStore()
+    await store.createProject('Sizer', 'Projects')
+
+    // Hand-authored note: frontmatter + a sentinel-marked managed link + exactly
+    // three real prose lines. Authored directly so the fixture is unambiguous.
+    const path = 'Projects/Sizer_tasks/sized.md'
+    await vault.create(
+      path,
+      taskFileBody([
+        '---',
+        'pm-task: true',
+        'id: sized-1',
+        'title: Sized',
+        '---',
+        '',
+        `Part of [[Sizer]] ${LINK_SENTINEL}`,
+        '',
+        'First real line.',
+        'Second real line.',
+        'Third real line.'
+      ])
+    )
+
+    const countLines = probe(store).bodyContentLines
+    expect(countLines, 'ProjectStore.bodyContentLines(file) must exist').toBeTypeOf('function')
+    if (!countLines) return
+
+    const file = fileAt(vault, path)
+    // Exactly the three prose lines — NOT four. The managed link line must be
+    // excluded (counting it is the negative-control bug), as must the frontmatter.
+    expect(
+      await countLines.call(store, file),
+      'only the 3 real prose lines count; frontmatter + the managed link line are excluded'
+    ).toBe(3)
+  })
+
+  it('R40: the managed backlink targets the IMMEDIATE parent — project, parent task, or (for a milestone) the project', async () => {
+    // negative-control: the backlink ALWAYS points at the project regardless of the
+    // immediate parent, so a subtask under a parent task links the wrong note and
+    // the graph mis-nests it directly under the project.
+    const { store, vault } = newStore()
+    const project = await store.createProject('Tree', 'Projects')
+
+    // (a) a task directly under the project → links the project note.
+    const topTask = makeTask({ title: 'Top level task' })
+    await store.insertTask(project, topTask)
+    // (b) a subtask under that task → links the PARENT TASK (not the project).
+    const sub = makeTask({ title: 'Nested subtask' })
+    await store.insertTask(project, sub, topTask.id)
+    // (c) a milestone under the project → links the project note.
+    const milestone = makeTask({ title: 'A milestone', type: 'milestone' })
+    await store.insertTask(project, milestone)
+
+    const projectBasename = basenameOf(project.filePath)
+    const topBasename = basenameOf(topTask.filePath)
+
+    const targetsOf = async (filePath: string | undefined): Promise<string[]> => {
+      const line = managedLinkLine(await bodyOf(vault, filePath ?? ''))
+      expect(line, `every managed item must carry a ${LINK_SENTINEL} backlink line`).toBeTruthy()
+      return line ? wikilinkTargets(line) : []
+    }
+
+    expect(await targetsOf(topTask.filePath), 'a task under the project links the project note').toContain(
+      projectBasename
+    )
+    const subTargets = await targetsOf(sub.filePath)
+    expect(subTargets, 'a subtask under a parent task links the PARENT TASK').toContain(topBasename)
+    expect(subTargets, 'the subtask must NOT link the project (that is the negative-control bug)').not.toContain(
+      projectBasename
+    )
+    expect(await targetsOf(milestone.filePath), 'a milestone under the project links the project note').toContain(
+      projectBasename
+    )
   })
 })
