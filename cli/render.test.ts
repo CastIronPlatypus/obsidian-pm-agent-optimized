@@ -180,6 +180,28 @@ describe('render: tree', () => {
     expect(lineWithId(after.stdout, fx.bare), 'prose flips the ✎ detector on').toMatch(/✎\d+/)
   })
 
+  it('GAP-2b REGRESSION: a noteless project shows no ✎ (auto # H1 + ## Tasks mirror excluded)', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    // projA has tasks → the store writes an auto `# {icon} {title}` H1 and a
+    // `## Tasks` mirror into its body, but no human description. ✎ must stay off.
+    const r = await run(vault, ['projects'])
+    const line = r.stdout.split('\n').find((l) => l.includes(fx.projA))
+    expect(line, 'project row present').toBeDefined()
+    expect(line, 'auto H1 + ## Tasks mirror must not count as readable content').not.toContain('✎')
+  })
+
+  it('--fields trims the --json payload on tree (token economy), leaving only requested keys', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    const full = await run(vault, ['tree', fx.milestone, '--sub', '--json'])
+    const trimmed = await run(vault, ['tree', fx.milestone, '--sub', '--json', '--fields', 'id,status'])
+    expect(trimmed.stdout.length, '--fields measurably shrinks the json payload').toBeLessThan(full.stdout.length)
+    const nodes = (JSON.parse(trimmed.stdout).data?.nodes ?? []) as Array<Record<string, unknown>>
+    expect(nodes.length, 'nodes still present').toBeGreaterThan(0)
+    expect(Object.keys(nodes[0]!).sort(), 'each node trimmed to the requested keys').toEqual(['id', 'status'])
+  })
+
   it('--needs renders the upstream section with the predecessor', async () => {
     const vault = makeVault()
     const fx = await seed(vault)

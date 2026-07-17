@@ -141,7 +141,9 @@ const LINK_SENTINEL = '<!-- pm:link -->'
 const ID_RULE = /^[A-Za-z0-9._-]{1,64}$/
 
 /** Injected clock so every date-bearing rendered surface is byte-deterministic. */
-const NOW = '2026-07-16'
+// Track the real clock so the pinned command-`now` and the `today()`-built
+// fixtures can never diverge at a midnight date-rollover (determinism).
+const NOW = today().toString()
 
 /** Convenience: run a command against a vault and return the result. */
 async function run(vault: string, argv: string[]): Promise<PmResult> {

@@ -149,7 +149,7 @@ export interface TaskSource {
     project: Project,
     taskId: string,
     deltaDays: number,
-    opts?: { cascadeSubtree?: boolean }
+    opts?: { cascadeSubtree?: boolean; scheduleDownstream?: boolean }
   ): Promise<number>
   saveTaskAttachment(project: Project, task: Task, fileName: string, data: ArrayBuffer): Promise<TFile>
   findTaskFileConflict(project: Project, task: Task): TaskFileNameConflictError | null

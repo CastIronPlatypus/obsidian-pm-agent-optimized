@@ -114,7 +114,7 @@ A headless `pm` CLI, shipped as a separate `cli/**` package, that is the agent's
 - **`pm export <project>`** — portable snapshot; same shape `pm apply` consumes (round-trip).
 - **`pm snapshot` / `pm restore`** — vault-wide backup/restore of the PM subset.
 - **`pm batch < ops.ndjson`** — atomic, all-or-nothing; one save + one scheduler pass per touched project; per-op `results[]`; any invalid op → `E_BATCH`, nothing written.
-- **`pm watch [--ndjson]`** — long-lived change-event stream (chokidar-backed vault events + ingestion) so an agent reacts to the human editing in Obsidian live.
+- **`pm watch [--ndjson]`** — long-lived change-event stream (filesystem-watch–backed vault events + ingestion) so an agent reacts to the human editing in Obsidian live. (The watch backend is an implementation detail — Node's `fs.watch` with no added dependency — not a pinned requirement.)
 
 ### F. Coupled plugin behaviors the CLI must honor (already shipped)
 
@@ -128,7 +128,7 @@ A headless `pm` CLI, shipped as a separate `cli/**` package, that is the agent's
 
 ## Non-Goals
 
-- **No change to `src/store/**` or any plugin source.** The store runs UNMODIFIED; the CLI adds only new I/O + presentation under `cli/**`. (A missing store capability is an AE-001 change under its own Intent.)
+- **The CLI re-implements no store invariant.** All domain logic — id-minting, folder association, dependency scheduling, bidirectional rename / project move, cycle detection, and content detection — lives in `src/store/**` and is REUSED, never forked into `cli/**`. Where exposing existing store logic to the CLI required a thin, additive, backward-compatible method (e.g. `shiftTaskDates`, `bodyContentLines`/`realContentLines`, the `scheduleDownstream` shift option), it was added to the **shared** store — serving both the plugin and the CLI — with the `TaskSource` interface kept in sync. The reuse thesis is about not duplicating invariants in the shell, not about freezing the store; no CLI command carries its own copy of an invariant. (The `## Subtasks`/`## Tasks` content-detection fix additionally corrects the plugin's own `✎`/INT-021 signal.)
 - **No TUI, no colors-by-default, no interactive prompts.** Ambiguity is a deterministic error, not a question. (The rendered default output is agent-readable plain text — not a TUI.)
 - **No new storage format or schema migration** beyond what the store already does.
 - **No writing of plugin-owned UI state** (`collapsedTasks`, `projectFilters`, saved-view selection).
@@ -184,6 +184,7 @@ verification:
 | 2026-07-16 | Substantive | Locked via ADR-017 Path B. TESTPASS → LOCKED. | Claude (land agent) |
 | 2026-07-17 | unlock | LOCKED → PROPOSED. Reopened: acceptance was a scoped MVP phase (R41–R46) that silently deferred the rendering layer, ~15 commands, most of the flag surface, and watch/snapshot/restore. The phasing itself was the defect. | Claude (transition) |
 | 2026-07-17 | Substantive | REWRITTEN to encode the ENTIRE verbatim requirement surface (sections A–G) as the single acceptance contract — no phasing, no deferral. The engineer's literal requirement exchange is embedded verbatim in the Appendix as the authoritative acceptance rubric. Prior "deferred" non-goals removed; watch/snapshot/restore/export/batch/reconcile/validate/rollup/graph/critical-path/blockers/explain + full rendering layer moved IN SCOPE. Acceptance now requires an adversarial completeness audit vs the verbatim showing zero gaps before re-lock. | Claude (INT-019 rewrite, engineer-directed full-auto 2026-07-17) |
+| 2026-07-17 | Substantive | Adversarial grader (round 1) found 1 dead flag + 4 fidelity defects on the shipped code; all fixed + regression-tested (--no-schedule wired; ✎ ignores the auto `## Subtasks`/`## Tasks` mirrors + project H1; shift --no-cascade truly item-only; show --fields gates body; today/open DFS order). Round 2 found the project-`✎` over-count, `--fields` breadth (show-only), `TaskSource` interface drift, a brittle date test, and a vestigial `--apply` flag — all fixed. Non-Goal reconciled to the true reuse thesis (no forked invariants) since the verbatim's cascade + content-detection behavior necessitates thin additive shared-store methods; `watch` backend de-pinned (fs.watch). | Claude (grader-loop fixes, full-auto 2026-07-17) |
 
 ---
 

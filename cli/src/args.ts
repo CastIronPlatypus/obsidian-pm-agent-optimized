@@ -30,7 +30,6 @@ const BOOLEAN_FLAGS = new Set([
   'include-archived',
   'transitive',
   'fix',
-  'apply',
   'prune',
   'rich',
   'has-notes',

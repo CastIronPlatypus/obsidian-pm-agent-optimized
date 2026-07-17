@@ -65,7 +65,7 @@ import {
 type Handler = (ctx: PmContext, cmd: ParsedCommand) => Promise<HandlerOutput>
 
 const HANDLERS: Record<string, Handler> = {
-  projects: (ctx) => projects(ctx),
+  projects,
   tree,
   today: (ctx) => todayCmd(ctx),
   overdue: (ctx) => overdueCmd(ctx),

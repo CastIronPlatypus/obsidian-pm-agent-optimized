@@ -153,7 +153,23 @@ const lineageLegend = (): LegendEntry[] => [...statusLegend(), LEGEND.notes!, LE
 
 // ─── projects ───────────────────────────────────────────────────────────────
 
-export async function projects(ctx: PmContext): Promise<HandlerOutput> {
+/**
+ * `--fields a,b,c` trims each JSON payload object to the requested keys (token
+ * economy). Applies to the `--json` data only — never reshapes porcelain columns
+ * (those stay faithful per the frozen render grammar).
+ */
+function pickFields<T extends object>(items: readonly T[], fields: string[]): (T | Record<string, unknown>)[] {
+  if (!fields.length) return [...items]
+  return items.map((it) => {
+    const rec = it as Record<string, unknown>
+    const o: Record<string, unknown> = {}
+    for (const f of fields) if (f in rec) o[f] = rec[f]
+    return o
+  })
+}
+
+export async function projects(ctx: PmContext, cmd?: ParsedCommand): Promise<HandlerOutput> {
+  const fields = cmd ? flagList(cmd.flags, 'fields') : []
   const all = await ctx.store.discoverProjects()
   const columns = ['id', 'status', 'tasks', 'notes', 'title']
   const rows: ViewRow[] = []
@@ -175,7 +191,7 @@ export async function projects(ctx: PmContext): Promise<HandlerOutput> {
     data.push({ id: p.id, title: p.title, filePath: p.filePath, path: p.path ?? '', taskCount: count, noteLines: notes })
   }
   return {
-    data: { projects: data },
+    data: { projects: pickFields(data, fields) },
     view: {
       format: 'table',
       columns,
@@ -238,6 +254,7 @@ export async function tree(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
   const rich = flagBool(cmd.flags, 'rich')
   const transitive = flagBool(cmd.flags, 'transitive')
   const includeArchived = flagBool(cmd.flags, 'include-archived')
+  const fields = flagList(cmd.flags, 'fields')
   const treeOpts = { depth, includeArchived }
 
   const wantNeeds = flagBool(cmd.flags, 'needs') || flagBool(cmd.flags, 'all')
@@ -276,7 +293,7 @@ export async function tree(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
       rows.push(await taskRow(ctx, project, task, nodeDepth, { rel: 'sub' }))
     }
     return {
-      data: { root: located.kind === 'project' ? project.id : located.task.id, nodes },
+      data: { root: located.kind === 'project' ? project.id : located.task.id, nodes: pickFields(nodes, fields) },
       view: { format: 'lineage', legend, rich, rows }
     }
   }
@@ -726,7 +743,7 @@ export async function find(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
     data.push({ id: task.id, title: task.title, status: task.status, due: task.due, project: project.id, type: task.type })
   }
   return {
-    data: { items: data },
+    data: { items: pickFields(data, flagList(cmd.flags, 'fields')) },
     view: { format: 'table', columns, rows, footer: `${chosen.length} match${chosen.length === 1 ? '' : 'es'}` }
   }
 }
