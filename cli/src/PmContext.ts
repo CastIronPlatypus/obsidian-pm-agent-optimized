@@ -33,7 +33,8 @@ export interface PmContext {
  * `.obsidian/` directory → `E_NO_VAULT`.
  */
 export function resolveVaultRoot(opts: { vault?: string; cwd?: string } = {}): string {
-  const explicit = opts.vault ?? process.env.PM_VAULT
+  // An empty `--vault ''` must NOT shadow PM_VAULT (`'' ?? env` would return '').
+  const explicit = (opts.vault && opts.vault.length > 0 ? opts.vault : undefined) ?? process.env.PM_VAULT
   if (explicit) {
     const root = isAbsolute(explicit) ? explicit : resolve(opts.cwd ?? process.cwd(), explicit)
     if (!existsSync(root)) {
