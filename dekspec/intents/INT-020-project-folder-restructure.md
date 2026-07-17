@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTING
+LOCKED
 
 ## Intent type
 
@@ -128,6 +128,20 @@ verification:
     cmd: pnpm build
 ```
 
+### Testpass results (2026-07-16)
+
+Diff confinement: the project-folder-restructure work shipped on `main` via direct commits (this repo has no `int/` branch corpus and no dekbeads tracker), so the branch-diff and bead-closure gates of `--testpass` are N/A; the Intent locks via ADR-017 Path B (all downstream WS-007/IB-007 ≥ ACCEPTED). Verification predicate re-evaluated from `main`:
+
+| Check | Cmd | Result |
+| --- | --- | --- |
+| typecheck-lint-format-clean | `pnpm check` | PASS (exit 0) |
+| submission-lint-clean | `pnpm check:submission` | PASS (exit 0) |
+| build | `pnpm build` | PASS (exit 0) |
+| intention-contract-r33-r36 | `vitest run src/intention.test.ts -t "Feature 7"` | PASS (4 passed — R33–R36 green) |
+| full-suite-green | `pnpm test` | INT-020 scope GREEN — 298 passed, 1 skipped. The 10 reds are the **red-first** contracts of parallel un-landed intents (INT-021 Feature 8 R37–R40 in `src/intention.test.ts`; the `pm` CLI Feature 9 R41–R46 in `cli/pm.test.ts`), not regressions. Every pre-INT-020 test (R1–R32), the INT-020 contract (R33–R36), and the new `src/store/ProjectFolderRestructure.test.ts` edge suite pass. Baseline before this Intent: 14 red (R33–R46); after: 10 red (R37–R46) — exactly the four R33–R36 cases flipped green with zero other-test regressions. |
+
+Assertion reconciliation (layout-location updates required by the restructure, per IB-007 "Assertion migration"; each changed ONLY a flat→nested path literal, preserving what the assertion checks): `src/intention.test.ts` R1–R7, R9, R10, R13, R14, R15, R24, R26, R27; and the createProject-based tests in `src/store/ProjectStore.test.ts`, `src/store/PerProjectDirectories.test.ts`, `src/store/rename.test.ts` (the flat-seed legacy/`loadProject` tests stay flat). A latent `test/fakeVault.ts` folder-rename child-duplication bug (masked until a test counted tasks after a folder move) was fixed so the double matches real Obsidian's recursive rename.
+
 ## Outcome Verification
 
 On `createProject('Nested Home', 'Areas/Ops')` the store creates `Areas/Ops/Nested Home/` containing `Areas/Ops/Nested Home/Nested Home.md` and `Areas/Ops/Nested Home/Nested Home_tasks/`, persists `path: Areas/Ops`, and `projectDirectory` resolves to `Areas/Ops` — with nothing at the old flat `Areas/Ops/Nested Home.md`. A legacy flat-layout project (`Projects/Legacy Proj.md` + `Projects/Legacy Proj_tasks/`) loaded by discovery is relocated to `Projects/Legacy Proj/Legacy Proj.md` + `Projects/Legacy Proj/Legacy Proj_tasks/`, preserving the note body and its tasks; a re-load is a no-op. Its tasks still load into the tree (folder-based association survived). `moveProject(project, 'Areas/Portfolio')` relocates the whole `Movable/` folder — note, `Movable_tasks/`, and any freeform content — under `Areas/Portfolio/`, leaving nothing behind, and updates `path`/`projectDirectory` to `Areas/Portfolio`. These are the red-first outcome tests R33 (create nested), R34 (migrate on load), R35 (association survives), and R36 (folder-level move) in `src/intention.test.ts`.
@@ -144,3 +158,6 @@ On `createProject('Nested Home', 'Areas/Ops')` the store creates `Areas/Ops/Nest
 | 2026-07-16 | Substantive | Intent authored at PROPOSED; inline `--analyze` performed against the pinned R33–R36 contract (Coverage/Size/Layer/Verification populated), acceptance pre-authorized by engineer in full-auto session. | Claude (intent-authoring agent) |
 | 2026-07-16 | Substantive | Promoted PROPOSED to ACCEPTED via /write-intent --accept. Engineer acceptance pre-authorized for full-auto session 2026-07-16 (recorded in Source). No dekbeads CLI in repo — bead authoring gate deferred to IB Done-When task lists at --decompose. | Claude (engineer-directed, pre-authorized) |
 | 2026-07-16 | Substantive | Decomposed into 1 IU (1 IB, 0 direct beads): WS-007 + IB-007. No dekbeads CLI in repo — bead work captured as IB Done-When task lists. ACCEPTED to IMPLEMENTING via /write-intent --decompose. R33–R36 authored red-first in `src/intention.test.ts`. | Claude (engineer-directed) |
+| 2026-07-16 | Substantive | Implemented the nested per-project-folder layout + migrate-on-load in `src/store/ProjectStore.ts` (createProject/projectDirectory/renameProject/moveProject/`migrateLegacyProjects`) and `src/store/TaskSource.ts`; reconciled the layout-location assertions (flat→nested literals only) across `src/intention.test.ts` + the createProject-based store tests; fixed a latent `test/fakeVault.ts` folder-rename child-duplication; added `src/store/ProjectFolderRestructure.test.ts` edge suite. R33–R36 green. | Claude (INT-020 build worker) |
+| 2026-07-16 | Substantive | Verification predicate re-evaluated from main (pnpm check exit 0; pnpm check:submission exit 0; pnpm build exit 0; vitest src/intention.test.ts -t "Feature 7" = R33–R36 4 passed). Full suite: INT-020 scope green (298 passed/1 skipped); the 10 reds are the red-first R37–R46 contracts of parallel un-landed intents (INT-021, `pm` CLI) — not regressions (baseline 14 red R33–R46 → 10 red R37–R46). Branch-diff/bead gates N/A — work shipped on main, no int/ branch or dekbeads corpus. IMPLEMENTING to TESTPASS via /write-intent --testpass. | Claude (INT-020 land agent) |
+| 2026-07-16 | Substantive | Locked via ADR-017 Path B — all downstream WS-007/IB-007 >= ACCEPTED. Linked AEs AE-001/AE-006 already ACCEPTED (no status inversion). TESTPASS to LOCKED via /write-intent --lock. | Claude (INT-020 land agent) |
