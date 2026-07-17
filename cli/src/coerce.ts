@@ -12,6 +12,21 @@ export function coerceScalar(raw: string): string | number | boolean {
   return raw
 }
 
+/**
+ * Parse a `shift` delta into whole days: `+Nd`/`-Nd` (days), `+Nw`/`-Nw` (weeks,
+ * ×7), `+Nm`/`-Nm` (months, ×30 approx). A bare number is days. Returns null on
+ * an unparseable spec. The single home for delta parsing (no leaf re-rolls it).
+ */
+export function parseDelta(spec: string): number | null {
+  const m = /^([+-]?)(\d+)([dwm]?)$/.exec(spec.trim())
+  if (!m) return null
+  const sign = m[1] === '-' ? -1 : 1
+  const n = Number(m[2])
+  const unit = m[3] || 'd'
+  const mult = unit === 'w' ? 7 : unit === 'm' ? 30 : 1
+  return sign * n * mult
+}
+
 /** Split a comma list into trimmed, non-empty items. */
 export function coerceList(raw: string): string[] {
   return raw

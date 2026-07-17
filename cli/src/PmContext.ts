@@ -10,8 +10,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { App } from 'obsidian'
 import { ProjectStore } from '../../src/store'
+import { today } from '../../src/dates'
 import type { PMSettings, Project } from '../../src/types'
 import { DEFAULT_SETTINGS } from '../../src/types'
+
+const todayIso = (): string => today().toString()
 import { makeNodeApp, type NodeApp, type NodeVault } from './NodeVaultAdapter'
 import { PmError } from './envelope'
 
@@ -21,6 +24,8 @@ export interface PmContext {
   settings: PMSettings
   app: NodeApp
   vault: NodeVault
+  /** Injectable "today" (YYYY-MM-DD) so date-bearing views are byte-deterministic in tests. */
+  now: string
 }
 
 /**
@@ -71,12 +76,13 @@ export function loadSettings(vaultRoot: string): PMSettings {
   return settings
 }
 
-export async function createPmContext(opts: { vault: string; cwd?: string }): Promise<PmContext> {
+export async function createPmContext(opts: { vault: string; cwd?: string; now?: string }): Promise<PmContext> {
   const vaultRoot = resolveVaultRoot(opts)
   const settings = loadSettings(vaultRoot)
   const { app, vault } = makeNodeApp(vaultRoot)
   const store = new ProjectStore(app as unknown as App, () => settings)
-  return { vaultRoot, store, settings, app, vault }
+  const now = opts.now ?? todayIso()
+  return { vaultRoot, store, settings, app, vault, now }
 }
 
 /** Load every project in the vault (frontmatter-hydrated; bodies lazy). */

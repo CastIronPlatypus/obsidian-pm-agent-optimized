@@ -6,7 +6,7 @@
 import { TFile } from 'obsidian'
 import type { Project, StatusConfig, Task } from '../../../src/types'
 import { findTaskById, flattenTasks } from '../../../src/store'
-import { today, parsePlainDate } from '../../../src/dates'
+import { parsePlainDate } from '../../../src/dates'
 import type { PmContext } from '../PmContext'
 import { resolveHandle, resolveProjectRef } from '../handles'
 import { PmError, type HandlerOutput } from '../envelope'
@@ -314,7 +314,7 @@ function renderRootHeader(row: ViewRow, _statuses: StatusConfig[]): string {
 
 export async function todayCmd(ctx: PmContext): Promise<HandlerOutput> {
   const all = await ctx.store.discoverProjects()
-  const iso = today().toString()
+  const iso = ctx.now
   const due: Located[] = []
   let overdueCount = 0
   for (const loc of allTasks(all)) {
@@ -343,7 +343,7 @@ export async function todayCmd(ctx: PmContext): Promise<HandlerOutput> {
 
 export async function overdueCmd(ctx: PmContext): Promise<HandlerOutput> {
   const all = await ctx.store.discoverProjects()
-  const iso = today().toString()
+  const iso = ctx.now
   const items = allTasks(all).filter(
     ({ project, task }) => task.due && task.due < iso && !isComplete(task, statusesOf(ctx, project))
   )
@@ -366,7 +366,7 @@ export async function overdueCmd(ctx: PmContext): Promise<HandlerOutput> {
 
 export async function open(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerOutput> {
   const all = await ctx.store.discoverProjects()
-  const iso = today().toString()
+  const iso = ctx.now
   let located = allTasks(all).filter(({ project, task }) => !isComplete(task, statusesOf(ctx, project)))
   if (flagStr(cmd.flags, 'by') === 'deps') {
     located = located.sort((a, b) => {
@@ -415,7 +415,7 @@ export async function blocked(ctx: PmContext): Promise<HandlerOutput> {
 
 export async function next(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerOutput> {
   const all = await ctx.store.discoverProjects()
-  const iso = today().toString()
+  const iso = ctx.now
   const frontier: Located[] = []
   for (const loc of allTasks(all)) {
     const statuses = statusesOf(ctx, loc.project)
@@ -449,14 +449,14 @@ export async function next(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
 // ─── agenda ───────────────────────────────────────────────────────────────────
 
 export async function agenda(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerOutput> {
-  const raw = cmd.positionals[0] ?? today().toString()
-  const arg = raw === 'this-week' ? weekRange(today().toString()) : raw
+  const raw = cmd.positionals[0] ?? ctx.now
+  const arg = raw === 'this-week' ? weekRange(ctx.now) : raw
   const [fromStr, toStr] = arg.includes('..') ? arg.split('..') : [arg, arg]
   const from = parsePlainDate(fromStr!)
   const to = parsePlainDate(toStr!)
   if (!from || !to) throw new PmError('E_USAGE', `invalid agenda date/range "${raw}"`)
   const all = await ctx.store.discoverProjects()
-  const iso = today().toString()
+  const iso = ctx.now
   const items = allTasks(all).filter(
     ({ task }) => task.due && task.due >= from.toString() && task.due <= to.toString()
   )
@@ -632,7 +632,7 @@ function matchDuration(task: Task, spec: string | undefined): boolean {
 
 export async function find(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerOutput> {
   const all = await ctx.store.discoverProjects()
-  const iso = today().toString()
+  const iso = ctx.now
   const projectRef = flagStr(cmd.flags, 'project')
   const scope = projectRef ? [resolveProjectRef(all, projectRef)] : all
 

@@ -40,6 +40,7 @@ import {
   agenda,
   blocked,
   deps,
+  explain,
   find,
   log,
   next,
@@ -71,6 +72,7 @@ const HANDLERS: Record<string, Handler> = {
   ls: find,
   agenda,
   log,
+  explain,
   palette,
   schema,
   'new project': newProject,
@@ -134,7 +136,10 @@ function errStdout(env: PmEnvelope, mode: OutMode): string {
   return `✗ ${e?.code ?? 'ERROR'}: ${e?.message ?? 'unknown error'}${ids}`
 }
 
-export async function runPm(argv: string[], opts: { vault?: string; cwd?: string } = {}): Promise<PmResult> {
+export async function runPm(
+  argv: string[],
+  opts: { vault?: string; cwd?: string; now?: string } = {}
+): Promise<PmResult> {
   const startedAt = Date.now()
   const cmd = parseArgs(argv)
   const mode = outMode(cmd.flags)
@@ -154,7 +159,7 @@ export async function runPm(argv: string[], opts: { vault?: string; cwd?: string
   if (!handler) return fail('E_USAGE', `unknown command "${cmd.command}"`)
 
   try {
-    const ctx = await createPmContext({ vault: vault ?? '', cwd: opts.cwd })
+    const ctx = await createPmContext({ vault: vault ?? '', cwd: opts.cwd, now: opts.now })
     envOpts.vault = ctx.vaultRoot
     const out = await handler(ctx, cmd)
     const env = okEnvelope(envOpts, out.data, { changed_ids: out.changed_ids, warnings: out.warnings })

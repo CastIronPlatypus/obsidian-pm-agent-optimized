@@ -34,6 +34,12 @@ const BOOLEAN_FLAGS = new Set([
   'prune',
   'rich',
   'has-notes',
+  'with-subtasks',
+  'dot',
+  'move',
+  'copy',
+  'add',
+  'remove',
   'help',
   'version'
 ])
