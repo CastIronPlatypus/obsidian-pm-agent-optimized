@@ -42,6 +42,18 @@ export interface TaskSource {
   loadTaskBody(task: Task): Promise<void>
   loadProjectBody(project: Project): Promise<void>
 
+  /**
+   * True iff a note holds real body content beyond its frontmatter and any
+   * store-managed backlink line(s) (`<!-- pm:link -->`); the signal behind the
+   * CLI `✎` symbol. A note that is only its managed backlink reads as empty.
+   */
+  hasBodyContent(file: TFile): Promise<boolean>
+  /**
+   * Count of non-blank body lines that survive stripping the frontmatter and any
+   * managed backlink line(s) — the CLI `✎N` size hint.
+   */
+  bodyContentLines(file: TFile): Promise<number>
+
   createProject(title: string, folder: string): Promise<Project>
   saveProject(project: Project): Promise<void>
   deleteProject(project: Project): Promise<void>

@@ -1261,3 +1261,79 @@ describe('ProjectStore cold-load id authority', () => {
     expect(child.id.length).toBeGreaterThan(0)
   })
 })
+
+describe('ProjectStore parent backlinks + content detection (INT-021)', () => {
+  const fileAt = (vault: FakeVault, path: string): TFile => {
+    const f = vault.getAbstractFileByPath(path)
+    if (!(f instanceof TFile)) throw new Error(`expected a file at ${path}`)
+    return f
+  }
+  const bodyOf = async (vault: FakeVault, path: string): Promise<string> =>
+    parseFrontmatter(await vault.cachedRead(fileAt(vault, path))).body
+
+  it('writes a sentinel-marked backlink to the immediate parent on insert (task/milestone/project targets)', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Roadmap', 'Projects')
+    const projectBase = project.filePath.replace(/^.*\//, '').replace(/\.md$/, '')
+
+    const top = await addNamed(store, project, 'Top task')
+    const topBase = expectDefined(top.filePath).replace(/^.*\//, '').replace(/\.md$/, '')
+    const sub = await addNamed(store, project, 'Nested subtask', top.id)
+    const milestone = makeTask({ title: 'A milestone', type: 'milestone' })
+    await store.insertTask(project, milestone)
+
+    const topLine = expectDefined(
+      (await bodyOf(vault, expectDefined(top.filePath))).split('\n').find((l) => l.includes('<!-- pm:link -->'))
+    )
+    expect(topLine).toContain(`[[${projectBase}`)
+
+    const subLine = expectDefined(
+      (await bodyOf(vault, expectDefined(sub.filePath))).split('\n').find((l) => l.includes('<!-- pm:link -->'))
+    )
+    expect(subLine).toContain(`[[${topBase}`)
+    expect(subLine).not.toContain(`[[${projectBase}`)
+
+    const msLine = expectDefined(
+      (await bodyOf(vault, expectDefined(milestone.filePath))).split('\n').find((l) => l.includes('<!-- pm:link -->'))
+    )
+    expect(msLine).toContain(`[[${projectBase}`)
+
+    // The frontmatter parent ref is additive/unchanged.
+    const subFm = parseFrontmatter(await vault.cachedRead(fileAt(vault, expectDefined(sub.filePath)))).frontmatter ?? {}
+    expect(subFm.parentId).toBe(top.id)
+  })
+
+  it('hasBodyContent is false for a backlink-only note and true after real prose', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Detect', 'Projects')
+    const task = await addNamed(store, project, 'Bare task')
+    const file = fileAt(vault, expectDefined(task.filePath))
+
+    expect(await store.hasBodyContent(file)).toBe(false)
+    await vault.process(file, (c) => `${c}\n\nA real note.\n`)
+    expect(await store.hasBodyContent(file)).toBe(true)
+  })
+
+  it('bodyContentLines counts only real prose, excluding frontmatter + the managed link line', async () => {
+    const { store, vault } = newStore()
+    await store.createProject('Sizer', 'Projects')
+    const path = 'Projects/Sizer/Sizer_tasks/sized.md'
+    await vault.create(
+      path,
+      [
+        '---',
+        'pm-task: true',
+        'id: sized-1',
+        'title: Sized',
+        '---',
+        '',
+        'Part of [[Sizer]] <!-- pm:link -->',
+        '',
+        'One.',
+        'Two.',
+        'Three.'
+      ].join('\n')
+    )
+    expect(await store.bodyContentLines(fileAt(vault, path))).toBe(3)
+  })
+})
