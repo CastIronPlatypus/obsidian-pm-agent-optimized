@@ -126,18 +126,60 @@ function outMode(flags: FlagMap): OutMode {
   return 'pretty'
 }
 
+export const PM_VERSION = '1.8.0'
+
+const HELP_TEXT = `pm — agent-first CLI for the Obsidian Project Manager vault
+
+USAGE  pm <command> [args] [flags]        (default output is the rendered printout)
+
+READ / NAVIGATE
+  projects                 list every project
+  tree <handle>            universal tree (--sub --needs --blocks --all --depth N --rich)
+  show <handle>            one entity's full note (--with-body --fields a,b)
+  find|ls <query>          flat, filterable, sortable table (--status --due-before …
+                           --sort col --project --tag --assignee --type --duration --has-notes)
+  today | overdue | open | blocked | next | agenda <date|range> | log --since <t>
+  deps <handle> | path <handle> | explain <handle>
+  palette [project] | schema [task|project|apply|batch]
+  rollup <project> --group-by … | validate [project] --fix | blockers [project]
+  graph <project> --dot | critical-path <project>
+
+CREATE / UPDATE / RESTRUCTURE
+  new project|task|subtask|milestone <title> [--under <parent>] [--after|--before <sib>]
+  set <handle> field=val … | status|due|priority|assign <handle> …
+  note <handle> --append|--set|--prepend <text>
+  depend|undepend <handle> --on <handle…>   (cycle-checked)
+  mv <handle> --under <parent> | mv project <handle> --dir <folder> | rename <handle> <title>
+  reorder <handle> --before|--after <sib> | dup <handle> --with-subtasks
+  archive|unarchive <handle> | rm <handle> [--project] | shift <handle> +Nd|+Nw|+Nm
+  apply <spec.yaml|-> [--prune] | import <note> --into <project> | reconcile [project]
+  export <project> | snapshot | restore <file> | batch < ops.ndjson | watch
+
+GLOBAL FLAGS
+  --vault <path>  --json --porcelain --ndjson  --fields a,b  --depth N
+  --dry-run  --explain  --no-cascade/--no-schedule  --quiet  -h/--help  --version
+
+EXIT CODES  0 ok · 2 usage · 4 no-vault · 5 cycle · 6 ambiguous · 7 not-found · 8 conflict · 9 batch`
+
 /** Pretty confirmation for a mutation that returned no view. */
-function renderConfirmation(env: PmEnvelope): string {
+function renderConfirmation(env: PmEnvelope, opts: { quiet?: boolean; explain?: boolean } = {}): string {
   const lines: string[] = []
   const changed = env.changed_ids ?? []
   const idPart = changed.length ? '  →  ' + changed.map((i) => `[${i}]`).join(' ') : ''
   lines.push(`✓ ${env.command}${idPart}`)
   if (env.meta?.dry_run) lines.push('(dry run — nothing written)')
-  for (const w of env.warnings ?? []) lines.push(`⚠ ${w.message}`)
+  if (opts.explain) {
+    const scheduled = (env.warnings ?? []).find((w) => w.code === 'SCHEDULE_MOVED')
+    lines.push(
+      `explain: ${env.command} affected ${changed.length} item${changed.length === 1 ? '' : 's'}` +
+        (scheduled ? `; ${scheduled.message}` : '')
+    )
+  }
+  if (!opts.quiet) for (const w of env.warnings ?? []) lines.push(`⚠ ${w.message}`)
   return lines.join('\n')
 }
 
-function okStdout(env: PmEnvelope, out: HandlerOutput, mode: OutMode): string {
+function okStdout(env: PmEnvelope, out: HandlerOutput, mode: OutMode, flags: FlagMap): string {
   if (mode === 'json') return JSON.stringify(env)
   if (out.view) {
     if (mode === 'porcelain') return renderPorcelain(out.view)
@@ -148,7 +190,7 @@ function okStdout(env: PmEnvelope, out: HandlerOutput, mode: OutMode): string {
   // a compact machine line; JSON handled above.
   if (mode === 'porcelain') return (env.changed_ids ?? []).join('\t')
   if (mode === 'ndjson') return JSON.stringify({ ok: true, command: env.command, changed_ids: env.changed_ids ?? [] })
-  return renderConfirmation(env)
+  return renderConfirmation(env, { quiet: flags.quiet === true, explain: flags.explain === true })
 }
 
 function errStdout(env: PmEnvelope, mode: OutMode): string {
@@ -175,6 +217,14 @@ export async function runPm(
     return { exitCode: exit, stdout: errStdout(env, mode), envelope: env }
   }
 
+  // Global --help / --version short-circuit (no vault needed).
+  if (cmd.flags.version === true || cmd.command === '--version' || cmd.command === '-V') {
+    return { exitCode: EXIT.OK, stdout: `pm ${PM_VERSION}`, envelope: okEnvelope(envOpts, { version: PM_VERSION }) }
+  }
+  if (cmd.flags.help === true || cmd.command === '--help' || cmd.command === '-h' || cmd.command === 'help') {
+    return { exitCode: EXIT.OK, stdout: HELP_TEXT, envelope: okEnvelope(envOpts, { help: true }) }
+  }
+
   if (!cmd.command) return fail('E_USAGE', 'no command given')
 
   const handler = HANDLERS[cmd.command]
@@ -185,7 +235,7 @@ export async function runPm(
     envOpts.vault = ctx.vaultRoot
     const out = await handler(ctx, cmd)
     const env = okEnvelope(envOpts, out.data, { changed_ids: out.changed_ids, warnings: out.warnings })
-    return { exitCode: EXIT.OK, stdout: okStdout(env, out, mode), envelope: env }
+    return { exitCode: EXIT.OK, stdout: okStdout(env, out, mode, cmd.flags), envelope: env }
   } catch (e) {
     if (e instanceof PmError) {
       const env = errorEnvelope(envOpts, { code: e.code, message: e.message, ids: e.ids })
