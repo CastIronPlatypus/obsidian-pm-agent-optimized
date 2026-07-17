@@ -59,7 +59,7 @@ interface PmResult {
   envelope: PmEnvelope
 }
 
-type RunPm = (argv: string[], opts?: { vault?: string; cwd?: string }) => Promise<PmResult>
+type RunPm = (argv: string[], opts?: { vault?: string; cwd?: string; now?: string }) => Promise<PmResult>
 
 /** The one store instance per invocation the CLI builds over the fs adapter. */
 interface PmContextLike {
@@ -140,22 +140,18 @@ function wikilinkTargets(line: string): string[] {
 const LINK_SENTINEL = '<!-- pm:link -->'
 const ID_RULE = /^[A-Za-z0-9._-]{1,64}$/
 
+/** Injected clock so every date-bearing rendered surface is byte-deterministic. */
+const NOW = '2026-07-16'
+
 /** Convenience: run a command against a vault and return the result. */
 async function run(vault: string, argv: string[]): Promise<PmResult> {
   if (!runPm) throw new Error('runPm unavailable')
-  return runPm(argv, { vault })
+  return runPm(argv, { vault, now: NOW })
 }
 
-/** The nodes array a `tree` envelope is pinned to carry (flat pre-order). */
-interface TreeNode {
-  id: string
-  depth: number
-  parentId: string | null
-  status: string
-  title: string
-  type?: string
-  content_lines: number
-  has_content?: boolean
+/** The stdout line carrying the bracketed anchor `[id]`, or undefined. */
+function stdoutLineWithId(stdout: string, id: string): string | undefined {
+  return stdout.split('\n').find((l) => l.includes(`[${id}]`))
 }
 
 // ─── Feature 9 — pm CLI (INT-019) ───────────────────────────────────────────
@@ -281,28 +277,26 @@ describe('Feature 9 — pm CLI', () => {
     appendFileSync(join(vault, prosePath), '\n\nThis note holds real content an agent should read.\n')
 
     // `tree` on the MILESTONE handle (tree works on ANY item), with the subtree.
+    // ASSERT ON THE RENDERED SURFACE (`result.stdout`) — the artifact the agent
+    // consumes — not on the JSON envelope.
     const tree = await run(vault, ['tree', milestoneId, '--sub'])
     expect(tree.exitCode, 'tree on a valid milestone exits 0').toBe(0)
-    expect(tree.envelope.ok).toBe(true)
 
-    // The glyph legend appears on the view.
-    const legend = String((tree.envelope.data ?? {}).legend ?? '')
-    for (const glyph of ['○', '◐', '●', '⊘']) {
-      expect(legend, `the glyph legend must document ${glyph}`).toContain(glyph)
-    }
+    // The glyph legend line opens the printout, byte-exact and greppable.
+    expect(tree.stdout, 'the printout opens with the frozen glyph legend line').toContain(
+      'legend:  ○ = todo   ◐ = doing   ● = done   ⊘ = blocked   ✎N = N lines of note body   ▸N = N children'
+    )
+    // The subtree renders as glyph rows: the milestone root + both children.
+    expect(stdoutLineWithId(tree.stdout, milestoneId), 'the milestone root row is emitted').toMatch(/[○◐●⊘]\s+\[/)
+    const bareLine = stdoutLineWithId(tree.stdout, bareId)
+    const proseLine = stdoutLineWithId(tree.stdout, proseId)
+    expect(bareLine, 'the bare child appears in the subtree').toBeDefined()
+    expect(proseLine, 'the prose child appears in the subtree').toBeDefined()
 
-    // The nested subtree is emitted as a flat pre-order node array.
-    const nodes = ((tree.envelope.data ?? {}).nodes ?? []) as TreeNode[]
-    expect(Array.isArray(nodes) && nodes.length > 0, 'tree --sub must emit the subtree nodes').toBe(true)
-    const bareNode = nodes.find((n) => n.id === bareId)
-    const proseNode = nodes.find((n) => n.id === proseId)
-    expect(bareNode, 'the bare child must appear in the subtree').toBeDefined()
-    expect(proseNode, 'the prose child must appear in the subtree').toBeDefined()
-
-    // The `✎N` content symbol reflects INT-021 detection: a note whose body is
-    // only the managed backlink has NO content; one with prose has content.
-    expect(bareNode?.content_lines, 'a managed-backlink-only note shows no content (no ✎)').toBe(0)
-    expect(proseNode?.content_lines ?? 0, 'a note with real prose shows ✎N with N>=1').toBeGreaterThanOrEqual(1)
+    // The `✎N` content symbol reflects INT-021 detection ON THE PRINTOUT: a note
+    // whose body is only the managed backlink shows NO ✎; one with prose shows ✎N.
+    expect(bareLine, 'a managed-backlink-only note shows no ✎ on its row').not.toContain('✎')
+    expect(proseLine, 'a note with real prose shows ✎N on its row').toMatch(/✎\d+/)
 
     // Exit-code contract: an unknown handle is E_NOT_FOUND (exit 7), never a crash.
     const missing = await run(vault, ['tree', 'no-such-id'])
@@ -329,23 +323,24 @@ describe('Feature 9 — pm CLI', () => {
     const dueTodayId = String((dueToday.envelope.data ?? {}).id ?? '')
     await run(vaultA, ['new', 'task', '--project', projA, '--title', 'Overdue item', '--due', overdueIso])
 
+    // ASSERT ON THE RENDERED SURFACE (`result.stdout`). Overdue work EXISTS, so
+    // exactly ONE ⚠ pointer must appear — never doubled, and never re-mentioned
+    // in the footer (the frozen single-⚠ rule from the Appendix mockup).
     const resA = await run(vaultA, ['today'])
     expect(resA.exitCode).toBe(0)
-    expect(resA.envelope.ok).toBe(true)
 
-    const items = ((resA.envelope.data ?? {}).items ?? []) as Array<{ id: string; due?: string; lineage?: unknown[] }>
-    const todayItem = items.find((i) => i.id === dueTodayId)
-    expect(todayItem, 'the due-today item must be listed').toBeDefined()
-    // Lineage-shaped: each item carries its ancestry (project → epic → item).
-    expect(Array.isArray(todayItem?.lineage) && (todayItem?.lineage?.length ?? 0) >= 1, 'items must be lineage-shaped').toBe(
-      true
-    )
+    expect((resA.stdout.match(/⚠/g) ?? []).length, 'exactly one ⚠ overdue pointer when overdue work exists').toBe(1)
+    expect(resA.stdout, 'the overdue pointer is the single neutral top line').toContain('⚠ 1 overdue — pm overdue')
+    // Lineage-shaped: the ancestor project + epic headers frame the due-today item.
+    expect(resA.stdout).toContain('Sprint')
+    expect(resA.stdout).toContain('Epic')
+    expect(stdoutLineWithId(resA.stdout, dueTodayId), 'the due-today item is listed').toBeDefined()
+    // The footer counts due-today work and must NOT re-mention overdue.
+    const footerA = resA.stdout.trimEnd().split('\n').at(-1) ?? ''
+    expect(footerA).toContain('due today')
+    expect(footerA, 'the footer never re-mentions overdue (single-⚠ rule)').not.toMatch(/overdue/)
 
-    // The single optional overdue pointer is present because overdue work exists.
-    expect(resA.envelope.data ?? {}, 'the overdue pointer must exist when overdue work exists').toHaveProperty('overdue')
-    expect((resA.envelope.data ?? {}).overdue, 'the overdue pointer is truthy when overdue exists').toBeTruthy()
-
-    // Scenario B: only a due-today item, nothing overdue → no overdue pointer.
+    // Scenario B: only a due-today item, nothing overdue → ZERO ⚠ pointers.
     const vaultB = makeVault()
     const pB = await run(vaultB, ['new', 'project', '--title', 'Calm', '--dir', 'Work'])
     const projB = String((pB.envelope.data ?? {}).id ?? '')
@@ -353,8 +348,8 @@ describe('Feature 9 — pm CLI', () => {
 
     const resB = await run(vaultB, ['today'])
     expect(resB.exitCode).toBe(0)
-    const overdueB = (resB.envelope.data ?? {}).overdue
-    expect(overdueB == null, 'the overdue pointer must be absent/null when nothing is overdue').toBe(true)
+    expect((resB.stdout.match(/⚠/g) ?? []).length, 'no ⚠ pointer when nothing is overdue').toBe(0)
+    expect(resB.stdout, 'the printout never mentions overdue when there is none').not.toContain('overdue')
   })
 
   it('R45: `set <id> due=…` cascades to a dependent; `--dry-run` reports without writing', async () => {
