@@ -19,3 +19,4 @@ _None yet — author the first one with `/write-ae`._
 | [AE-010](architecture-elements/AE-010-ui-composites.md) | UI Composite Components | component | Core | ACCEPTED | 2026-07-16 | 2026-07-16 |
 | [AE-011](architecture-elements/AE-011-ui-primitives.md) | UI Primitives & Design System Styling | component | Core | ACCEPTED | 2026-07-16 | 2026-07-16 |
 | [AE-012](architecture-elements/AE-012-view-orchestration.md) | Project/Dashboard View Orchestration | component | Core | ACCEPTED | 2026-07-16 | 2026-07-16 |
+| [AE-013](architecture-elements/AE-013-pm-cli.md) | Agent-first `pm` CLI | container | Core | ACCEPTED | 2026-07-16 | 2026-07-16 |

@@ -15,3 +15,7 @@ _None yet — author the first one with `/write-ws`._
 | [WS-006](working-specs/WS-006-agent-authored-id-authority.md) | Agent-authored ID authority on cold load | ACCEPTED | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
 | [WS-007](working-specs/WS-007-project-folder-restructure.md) | Project-folder restructure + legacy migration | ACCEPTED | AE-001, AE-006 | 2026-07-16 | 2026-07-16 |
 | [WS-008](working-specs/WS-008-parent-backlinks-content-detection.md) | Parent backlinks in body + content-aware detection | ACCEPTED | AE-001 | 2026-07-16 | 2026-07-16 |
+| [WS-009](working-specs/WS-009-cli-adapter-read-core.md) | `pm` CLI — adapter + read/nav core | ACCEPTED | AE-013, AE-001 | 2026-07-16 | 2026-07-16 |
+| [WS-010](working-specs/WS-010-cli-create-mutation-core.md) | `pm` CLI — create + single-item mutation core | ACCEPTED | AE-013, AE-001 | 2026-07-16 | 2026-07-16 |
+| [WS-011](working-specs/WS-011-cli-dependencies-scheduling-analysis.md) | `pm` CLI — dependencies, scheduling & analysis | ACCEPTED | AE-013, AE-001 | 2026-07-16 | 2026-07-16 |
+| [WS-012](working-specs/WS-012-cli-declarative-apply-batch.md) | `pm` CLI — declarative apply + batch | ACCEPTED | AE-013, AE-001 | 2026-07-16 | 2026-07-16 |
