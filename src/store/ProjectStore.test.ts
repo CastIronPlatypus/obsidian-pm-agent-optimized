@@ -967,6 +967,139 @@ describe('per-project config', () => {
   })
 })
 
+describe('ProjectStore.transact', () => {
+  it('batches N mutations into exactly one save and one schedule pass', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Batch', 'Projects')
+    const a = await addNamed(store, project, 'Alpha')
+    const b = await addNamed(store, project, 'Beta')
+    const c = await addNamed(store, project, 'Gamma')
+    vault.resetCounts()
+    const scheduleSpy = vi.spyOn(store, 'scheduleAfterChange')
+
+    await store.transact(project, async () => {
+      await store.updateTask(project, a.id, { status: 'in-progress' })
+      await store.updateTask(project, b.id, { status: 'in-progress' })
+      await store.updateTask(project, c.id, { status: 'done' })
+    })
+
+    // Exactly one project-file write (one save) despite three mutations.
+    expect(vault.modifyCount.get(project.filePath)).toBe(1)
+    // Each touched task file written exactly once by the single commit save.
+    expect(vault.modifyCount.get(expectDefined(a.filePath))).toBe(1)
+    expect(vault.modifyCount.get(expectDefined(b.filePath))).toBe(1)
+    expect(vault.modifyCount.get(expectDefined(c.filePath))).toBe(1)
+    // Exactly one schedule pass for the whole batch.
+    expect(scheduleSpy).toHaveBeenCalledTimes(1)
+    // Mutations still applied in memory.
+    expect(expectDefined(findTask(project.tasks, a.id)).status).toBe('in-progress')
+    expect(expectDefined(findTask(project.tasks, c.id)).status).toBe('done')
+  })
+
+  it('rolls back the in-memory tree and writes nothing when fn throws', async () => {
+    const { store, vault } = newStore()
+    const project = await store.createProject('Abort', 'Projects')
+    const a = await addNamed(store, project, 'Alpha')
+    const b = await addNamed(store, project, 'Beta')
+    vault.resetCounts()
+
+    await expect(
+      store.transact(project, async () => {
+        await store.updateTask(project, a.id, { status: 'in-progress', title: 'Renamed' })
+        await store.updateTask(project, b.id, { status: 'done' })
+        throw new Error('boom')
+      })
+    ).rejects.toThrow('boom')
+
+    // Nothing hit disk: no project or task writes, no renames.
+    expect(vault.modifyCount.get(project.filePath) ?? 0).toBe(0)
+    expect(vault.modifyCount.get(expectDefined(a.filePath)) ?? 0).toBe(0)
+    expect(vault.modifyCount.get(expectDefined(b.filePath)) ?? 0).toBe(0)
+    expect([...vault.createCount.keys()].length).toBe(0)
+
+    // In-memory tree rolled back to the pre-transaction snapshot.
+    expect(expectDefined(findTask(project.tasks, a.id)).status).toBe('todo')
+    expect(expectDefined(findTask(project.tasks, a.id)).title).toBe('Alpha')
+    expect(expectDefined(findTask(project.tasks, b.id)).status).toBe('todo')
+
+    // The aborted dirt is gone: a later save doesn't resurrect the reverted edits.
+    vault.resetCounts()
+    await store.updateTask(project, 'missing-id', {})
+    expect(vault.modifyCount.get(expectDefined(a.filePath)) ?? 0).toBe(0)
+    expect(vault.modifyCount.get(expectDefined(b.filePath)) ?? 0).toBe(0)
+  })
+})
+
+describe('subtree date propagation', () => {
+  // VERDICT PROBE: scheduleAfterChange is dependency-based, not containment-based,
+  // so shifting a parent's dates does NOT move a subtask that merely nests under
+  // it (no dependency edge). shiftTaskDates exists to fill that gap.
+  it('scheduleAfterChange leaves a nested subtask untouched when its parent moves', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('Contain', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const child = await addNamed(store, project, 'Child', parent.id)
+    await store.updateTask(project, parent.id, { start: '2026-07-01', due: '2026-07-05' })
+    await store.updateTask(project, child.id, { start: '2026-07-02', due: '2026-07-03' })
+
+    // Shift the parent's due out by +3d, then run the dependency scheduler.
+    await store.updateTask(project, parent.id, { due: '2026-07-08' })
+    await store.scheduleAfterChange(project, parent.id)
+
+    const c = expectDefined(findTask(project.tasks, child.id))
+    expect(c.start).toBe('2026-07-02') // unchanged — nesting is not a dependency
+    expect(c.due).toBe('2026-07-03')
+  })
+
+  it('shiftTaskDates drags the subtree by the same delta and reschedules dependents', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('Drag', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const child = await addNamed(store, project, 'Child', parent.id)
+    const dependent = await addNamed(store, project, 'Dependent')
+    await store.updateTask(project, parent.id, { start: '2026-07-01', due: '2026-07-05' })
+    await store.updateTask(project, child.id, { start: '2026-07-02', due: '2026-07-03' })
+    await store.updateTask(project, dependent.id, {
+      start: '2026-07-06',
+      due: '2026-07-07',
+      dependencies: [parent.id]
+    })
+
+    const n = await store.shiftTaskDates(project, parent.id, 3, { cascadeSubtree: true })
+    expect(n).toBe(2) // parent + child both had dates to move
+
+    const p = expectDefined(findTask(project.tasks, parent.id))
+    expect(p.start).toBe('2026-07-04')
+    expect(p.due).toBe('2026-07-08')
+    const c = expectDefined(findTask(project.tasks, child.id))
+    expect(c.start).toBe('2026-07-05')
+    expect(c.due).toBe('2026-07-06')
+    // Dependent cascades: must start the day after the parent's new due (07-08 → 07-09),
+    // preserving its 2-day duration.
+    const d = expectDefined(findTask(project.tasks, dependent.id))
+    expect(d.start).toBe('2026-07-09')
+    expect(d.due).toBe('2026-07-10')
+  })
+
+  it('shiftTaskDates moves only the target task when cascadeSubtree is false', async () => {
+    const { store } = newStore()
+    const project = await store.createProject('DragOne', 'Projects')
+    const parent = await addNamed(store, project, 'Parent')
+    const child = await addNamed(store, project, 'Child', parent.id)
+    await store.updateTask(project, parent.id, { start: '2026-07-01', due: '2026-07-05' })
+    await store.updateTask(project, child.id, { start: '2026-07-02', due: '2026-07-03' })
+
+    const n = await store.shiftTaskDates(project, parent.id, 5, { cascadeSubtree: false })
+    expect(n).toBe(1)
+
+    expect(expectDefined(findTask(project.tasks, parent.id)).start).toBe('2026-07-06')
+    expect(expectDefined(findTask(project.tasks, parent.id)).due).toBe('2026-07-10')
+    // The nested child stays put.
+    expect(expectDefined(findTask(project.tasks, child.id)).start).toBe('2026-07-02')
+    expect(expectDefined(findTask(project.tasks, child.id)).due).toBe('2026-07-03')
+  })
+})
+
 describe('ProjectStore external task ingestion', () => {
   const fileAt = (vault: FakeVault, path: string): TFile => {
     const f = vault.getAbstractFileByPath(path)

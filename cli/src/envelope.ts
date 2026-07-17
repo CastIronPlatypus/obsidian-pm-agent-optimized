@@ -2,6 +2,8 @@
 // exit-code contract. Absence of a field is never ambiguous; exactly one of
 // `data` / `error` is present.
 
+import type { ViewSpec } from './render'
+
 export interface PmWarning {
   code: string
   message: string
@@ -30,9 +32,15 @@ export interface PmResult {
   envelope: PmEnvelope
 }
 
-/** What a command handler returns; `run` wraps it into an envelope. */
+/**
+ * What a command handler returns; `run` wraps it into an envelope. `data` is the
+ * JSON payload (emitted under `--json`); `view` is the normalized view model the
+ * renderer turns into the DEFAULT pretty printout (and `--porcelain`/`--ndjson`).
+ * A handler with no `view` renders a concise mutation confirmation in pretty mode.
+ */
 export interface HandlerOutput {
   data: Record<string, unknown>
+  view?: ViewSpec
   changed_ids?: string[]
   warnings?: PmWarning[]
 }

@@ -2,7 +2,7 @@ import type { Plugin, TAbstractFile } from 'obsidian'
 import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian'
 import type { PMSettings, Project, ResolvedProjectConfig, StatusConfig, Task } from '../types'
 import { DEFAULT_SETTINGS, isValidId, makeId, makeProject, makeTask } from '../types'
-import { today } from '../dates'
+import { parsePlainDate, today } from '../dates'
 import { isTerminalStatus } from '../utils'
 import { archiveTask as doArchiveTask, unarchiveTask as doUnarchiveTask } from './ArchiveOps'
 import { resolveProjectConfig } from './ProjectConfig'
@@ -157,6 +157,14 @@ function normalizePaletteValue(raw: unknown, palette: { id: string }[], defaultI
 export class ProjectStore implements TaskSource {
   /** Per-project promise chains to serialize concurrent saves */
   private saveQueues = new Map<string, Promise<void>>()
+
+  /**
+   * Project file paths whose per-mutator saves are currently suppressed by an
+   * open `transact`. While a path is present, `saveProject` buffers (marks dirty
+   * only) instead of writing; the transaction performs the single real save on
+   * commit. Nested transacts on the same project share the one entry (flat).
+   */
+  private deferredSaves = new Set<string>()
 
   /**
    * Task IDs whose .md file needs writing on the next save, with the kind of
@@ -766,6 +774,9 @@ export class ProjectStore implements TaskSource {
 
   async saveProject(project: Project): Promise<void> {
     const key = project.filePath
+    // Inside an open transaction, mutators keep marking tasks dirty but the write
+    // is held back until the transaction commits with its single save.
+    if (this.deferredSaves.has(key)) return
     const prev = this.saveQueues.get(key) ?? Promise.resolve()
     const next = (async () => {
       await prev
@@ -1802,5 +1813,88 @@ export class ProjectStore implements TaskSource {
     }
     await this.saveProject(project)
     return patches.length
+  }
+
+  // ─── Batch transactions ────────────────────────────────────────────────────
+
+  /**
+   * Run `fn` as one atomic batch against `project`. Per-mutator saves are
+   * suppressed while it runs (dirty state buffers in memory); on success exactly
+   * one `saveProject` + one `scheduleAfterChange` fire, on a throw the in-memory
+   * tree is rolled back to a pre-transaction snapshot and nothing is written.
+   */
+  async transact<T>(project: Project, fn: () => Promise<T> | T): Promise<T> {
+    const key = project.filePath
+    // Nested transaction on the same project: flatten. The outermost call owns
+    // the snapshot, the commit save, and the schedule pass.
+    if (this.deferredSaves.has(key)) return fn()
+
+    // Snapshot enough in-memory state to undo an aborted batch. No disk write
+    // happens until commit, so rolling back the tree + dirty set is sufficient.
+    const treeSnapshot = structuredClone(project.tasks)
+    const dirtySnapshot = new Map(this.dirtyTasks.get(key) ?? [])
+    this.deferredSaves.add(key)
+    try {
+      const result = await fn()
+      this.deferredSaves.delete(key)
+      await this.saveProject(project)
+      await this.scheduleAfterChange(project)
+      return result
+    } catch (e) {
+      this.deferredSaves.delete(key)
+      // Roll the tree back and drop any dirt the aborted batch accumulated.
+      project.tasks = treeSnapshot
+      rebuildTaskIndex(project)
+      if (dirtySnapshot.size > 0) this.dirtyTasks.set(key, dirtySnapshot)
+      else this.dirtyTasks.delete(key)
+      throw e
+    }
+  }
+
+  /**
+   * Shift `taskId`'s own `start`/`due` by `deltaDays` (empty dates stay empty),
+   * and — when `cascadeSubtree` is on (the default) — every descendant's
+   * `start`/`due` by the same delta, so a moved parent drags its subtree. Dates
+   * live in frontmatter, so touched tasks are marked `'fm'`. Composes with
+   * scheduling: after the shift it runs `scheduleAfterChange` so downstream
+   * DEPENDENTS still cascade. Returns the number of tasks whose dates moved.
+   */
+  async shiftTaskDates(
+    project: Project,
+    taskId: string,
+    deltaDays: number,
+    opts?: { cascadeSubtree?: boolean }
+  ): Promise<number> {
+    const task = findTaskById(project, taskId)
+    if (!task) return 0
+    const cascade = opts?.cascadeSubtree ?? true
+
+    const targets: Task[] = [task]
+    if (cascade) {
+      for (const ft of flattenTasks(task.subtasks)) targets.push(ft.task)
+    }
+
+    const shift = (iso: string): string => {
+      const d = parsePlainDate(iso)
+      return d ? d.add({ days: deltaDays }).toString() : iso
+    }
+
+    let shifted = 0
+    for (const t of targets) {
+      const patch: Partial<Task> = {}
+      if (t.start) patch.start = shift(t.start)
+      if (t.due) patch.due = shift(t.due)
+      if (patch.start === undefined && patch.due === undefined) continue
+      updateTaskInTree(project.tasks, t.id, patch)
+      this.markDirty(project, [t.id], 'fm')
+      shifted++
+    }
+    if (shifted === 0) return 0
+
+    await this.saveProject(project)
+    // Re-run the dependency scheduler so tasks downstream of the shifted subtree
+    // move to keep their predecessor constraints.
+    await this.scheduleAfterChange(project, taskId)
+    return shifted
   }
 }

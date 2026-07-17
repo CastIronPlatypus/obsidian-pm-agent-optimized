@@ -125,6 +125,32 @@ export interface TaskSource {
 
   /** Runs dependency-based auto-scheduling; a no-op when the project's config disables it. */
   scheduleAfterChange(project: Project, changedTaskId?: string): Promise<number>
+
+  /**
+   * Run `fn` as one batch against `project` with per-mutator disk saves
+   * SUPPRESSED: mutations still update the in-memory tree and accumulate dirty
+   * state, but nothing is written until `fn` settles. On success exactly one
+   * `saveProject` + one `scheduleAfterChange` run for the project; on a throw the
+   * in-memory `project.tasks` is rolled back to its pre-transaction snapshot and
+   * NOTHING is written (all-or-nothing). Nesting on the same project is flat — an
+   * inner `transact` just runs `fn` inline, with the outermost owning the save.
+   */
+  transact<T>(project: Project, fn: () => Promise<T> | T): Promise<T>
+
+  /**
+   * Shift a task's own `start`/`due` by `deltaDays` (empty dates stay empty).
+   * With `cascadeSubtree` (default true) every DESCENDANT's `start`/`due` shifts
+   * by the same delta, so a moved parent drags its subtree along; with it off
+   * only the one task moves. Composes with scheduling: after applying the shift
+   * it runs `scheduleAfterChange`, so downstream DEPENDENTS still cascade.
+   * Returns the count of tasks whose dates were shifted.
+   */
+  shiftTaskDates(
+    project: Project,
+    taskId: string,
+    deltaDays: number,
+    opts?: { cascadeSubtree?: boolean }
+  ): Promise<number>
   saveTaskAttachment(project: Project, task: Task, fileName: string, data: ArrayBuffer): Promise<TFile>
   findTaskFileConflict(project: Project, task: Task): TaskFileNameConflictError | null
 }
