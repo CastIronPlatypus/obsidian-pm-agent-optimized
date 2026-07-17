@@ -107,7 +107,9 @@ export async function overdueCmd(ctx: PmContext): Promise<HandlerOutput> {
   const all = await ctx.store.discoverProjects()
   const iso = today().toString()
   const items = allTasks(all)
-    .filter(({ project, task }) => task.due && task.due < iso && !isComplete(task, ctx.store.configFor(project).statuses))
+    .filter(
+      ({ project, task }) => task.due && task.due < iso && !isComplete(task, ctx.store.configFor(project).statuses)
+    )
     .map(({ project, task }) => shape(project, task))
   return { data: { items } }
 }

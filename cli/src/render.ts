@@ -42,7 +42,9 @@ export async function buildTreeNodes(
   const maxDepth = opts.depth ?? Infinity
   const flat = root
     ? [
-        ...(opts.includeRoot === false ? [] : [{ task: root, depth: 0, parentId: findParentId(project, root.id), visible: true }]),
+        ...(opts.includeRoot === false
+          ? []
+          : [{ task: root, depth: 0, parentId: findParentId(project, root.id), visible: true }]),
         ...flattenTasks(root.subtasks, opts.includeRoot === false ? 0 : 1, root.id)
       ]
     : flattenTasks(project.tasks)

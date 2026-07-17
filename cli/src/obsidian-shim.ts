@@ -32,9 +32,7 @@ export function normalizePath(p: string): string {
 
 export function parseLinktext(linktext: string): { path: string; subpath: string } {
   const hash = linktext.indexOf('#')
-  return hash < 0
-    ? { path: linktext, subpath: '' }
-    : { path: linktext.slice(0, hash), subpath: linktext.slice(hash) }
+  return hash < 0 ? { path: linktext, subpath: '' } : { path: linktext.slice(0, hash), subpath: linktext.slice(hash) }
 }
 
 export class TAbstractFile {

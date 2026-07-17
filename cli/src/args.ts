@@ -21,6 +21,8 @@ const BOOLEAN_FLAGS = new Set([
   'porcelain',
   'ndjson',
   'dry-run',
+  'diff',
+  'no-cascade',
   'explain',
   'no-schedule',
   'quiet',
@@ -66,7 +68,11 @@ export function parseArgs(argv: string[]): ParsedCommand {
     const value = next !== undefined && !next.startsWith('--') ? (i++, next) : ''
     if (REPEATABLE_FLAGS.has(name)) {
       const existing = flags[name]
-      flags[name] = Array.isArray(existing) ? [...existing, value] : existing !== undefined ? [String(existing), value] : [value]
+      flags[name] = Array.isArray(existing)
+        ? [...existing, value]
+        : existing !== undefined
+          ? [String(existing), value]
+          : [value]
     } else {
       flags[name] = value
     }
@@ -89,8 +95,16 @@ export function flagBool(flags: FlagMap, name: string): boolean {
 export function flagList(flags: FlagMap, name: string): string[] {
   const v = flags[name]
   if (v === undefined) return []
-  if (Array.isArray(v)) return v.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean)
-  if (typeof v === 'string') return v.split(',').map((s) => s.trim()).filter(Boolean)
+  if (Array.isArray(v))
+    return v
+      .flatMap((s) => s.split(','))
+      .map((s) => s.trim())
+      .filter(Boolean)
+  if (typeof v === 'string')
+    return v
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
   return []
 }
 

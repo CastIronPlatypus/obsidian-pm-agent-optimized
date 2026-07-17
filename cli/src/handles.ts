@@ -39,12 +39,14 @@ function ci(a: string, b: string): boolean {
 /** Resolve a project-only handle (id | slug | title). */
 export function resolveProjectRef(projects: Project[], ref: string): Project {
   const raw = ref.startsWith('id:') || ref.startsWith('path:') ? ref.slice(ref.indexOf(':') + 1) : ref
-  const matches = projects.filter(
-    (p) => p.id === raw || ci(projectSlug(p), raw) || ci(p.title, raw)
-  )
+  const matches = projects.filter((p) => p.id === raw || ci(projectSlug(p), raw) || ci(p.title, raw))
   if (matches.length === 1) return matches[0]!
   if (matches.length > 1) {
-    throw new PmError('E_AMBIGUOUS', `Project handle "${ref}" matched ${matches.length} projects`, matches.map((p) => p.id))
+    throw new PmError(
+      'E_AMBIGUOUS',
+      `Project handle "${ref}" matched ${matches.length} projects`,
+      matches.map((p) => p.id)
+    )
   }
   throw new PmError('E_NOT_FOUND', `No project matches handle "${ref}"`)
 }
@@ -65,7 +67,11 @@ export function resolveHandle(projects: Project[], ref: string): Located {
     }
     if (taskMatches.length === 1) return taskMatches[0]!
     if (taskMatches.length > 1) {
-      throw new PmError('E_AMBIGUOUS', `Handle "${ref}" matched ${taskMatches.length} tasks`, taskMatches.map((t) => t.task.id))
+      throw new PmError(
+        'E_AMBIGUOUS',
+        `Handle "${ref}" matched ${taskMatches.length} tasks`,
+        taskMatches.map((t) => t.task.id)
+      )
     }
     if (forced === 'id') throw new PmError('E_NOT_FOUND', `No entity matches id "${raw}"`)
   }
@@ -76,7 +82,11 @@ export function resolveHandle(projects: Project[], ref: string): Located {
   const projMatches = projects.filter((p) => ci(projectSlug(p), segments[0]!) || ci(p.title, segments[0]!))
   if (projMatches.length === 0) throw new PmError('E_NOT_FOUND', `No entity matches handle "${ref}"`)
   if (projMatches.length > 1) {
-    throw new PmError('E_AMBIGUOUS', `Project segment "${segments[0]}" matched ${projMatches.length} projects`, projMatches.map((p) => p.id))
+    throw new PmError(
+      'E_AMBIGUOUS',
+      `Project segment "${segments[0]}" matched ${projMatches.length} projects`,
+      projMatches.map((p) => p.id)
+    )
   }
   const project = projMatches[0]!
   if (segments.length === 1) return { kind: 'project', project }
@@ -92,7 +102,11 @@ export function resolveHandle(projects: Project[], ref: string): Located {
     )
     if (candidates.length === 0) throw new PmError('E_NOT_FOUND', `No entity matches handle "${ref}"`)
     if (candidates.length > 1) {
-      throw new PmError('E_AMBIGUOUS', `Segment "${seg}" matched ${candidates.length} tasks`, candidates.map((c) => c.task.id))
+      throw new PmError(
+        'E_AMBIGUOUS',
+        `Segment "${seg}" matched ${candidates.length} tasks`,
+        candidates.map((c) => c.task.id)
+      )
     }
     parentId = candidates[0]!.parentId
     current = candidates[0]!.task

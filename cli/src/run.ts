@@ -19,6 +19,21 @@ import { parseArgs, type ParsedCommand } from './args'
 import type { PmContext } from './PmContext'
 import { newMilestone, newProject, newSubtask, newTask } from './commands/create'
 import {
+  archive,
+  assign,
+  due,
+  mv,
+  note,
+  priority as setPriority,
+  rename,
+  set,
+  shift,
+  status,
+  unarchive
+} from './commands/update'
+import { depend, undepend } from './commands/deps'
+import { apply } from './commands/apply'
+import {
   agenda,
   blocked,
   deps,
@@ -58,7 +73,21 @@ const HANDLERS: Record<string, Handler> = {
   'new project': newProject,
   'new task': newTask,
   'new subtask': newSubtask,
-  'new milestone': newMilestone
+  'new milestone': newMilestone,
+  set,
+  status,
+  assign,
+  due,
+  priority: setPriority,
+  note,
+  rename,
+  mv,
+  shift,
+  archive,
+  unarchive,
+  depend,
+  undepend,
+  apply
 }
 
 export async function runPm(argv: string[], opts: { vault?: string; cwd?: string } = {}): Promise<PmResult> {
@@ -75,9 +104,7 @@ export async function runPm(argv: string[], opts: { vault?: string; cwd?: string
 
   const handler = HANDLERS[cmd.command]
   if (!handler) {
-    return errorResult(
-      errorEnvelope({ ...envOpts }, { code: 'E_USAGE', message: `unknown command "${cmd.command}"` })
-    )
+    return errorResult(errorEnvelope({ ...envOpts }, { code: 'E_USAGE', message: `unknown command "${cmd.command}"` }))
   }
 
   try {

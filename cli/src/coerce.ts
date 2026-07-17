@@ -1,6 +1,8 @@
-// Value coercion for CLI inputs. Wave A uses `coerceScalar` for create flags;
-// the `field=value` patch coercion (`parseAssignments`) is here for the mutation
-// commands (Wave B) that extend this module.
+// Value coercion for CLI inputs. `coerceScalar` handles create flags; the
+// `field=value` patch coercion (`parseAssignments` + `coercePatch`) feeds the
+// mutation commands (`set`, `apply`) that build a typed `Partial<Task>`.
+
+import type { Task } from '../../src/types'
 
 /** Coerce a raw string into a scalar: number, boolean, or the trimmed string. */
 export function coerceScalar(raw: string): string | number | boolean {
@@ -27,4 +29,48 @@ export function parseAssignments(pairs: string[]): Record<string, string> {
     out[pair.slice(0, eq)] = pair.slice(eq + 1)
   }
   return out
+}
+
+// Field kinds, mirroring the `pm schema` shapes, so `k=v` coerces the way the
+// modal would (arrays via comma lists, numbers, `YYYY-MM-DD` dates verbatim).
+const ARRAY_FIELDS = new Set(['assignees', 'tags', 'dependencies', 'subtaskIds'])
+const NUMBER_FIELDS = new Set(['progress', 'timeEstimate'])
+const DATE_FIELDS = new Set(['due', 'start', 'completed'])
+const CLEAR_TOKENS = new Set(['', 'none', 'clear', 'null'])
+
+/**
+ * Coerce a `{ field: rawValue }` map into a typed `Partial<Task>`:
+ * arrays split on commas, numbers parsed, dates kept as strings (blank/`clear`
+ * unsets them), and `customFields.<id>=…` folded into `customFields`.
+ */
+export function coercePatch(raw: Record<string, string>): Partial<Task> {
+  const patch: Partial<Task> = {}
+  const customFields: Record<string, unknown> = {}
+  let hasCustom = false
+
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.startsWith('customFields.')) {
+      customFields[key.slice('customFields.'.length)] = coerceScalar(value)
+      hasCustom = true
+      continue
+    }
+    if (ARRAY_FIELDS.has(key)) {
+      ;(patch as Record<string, unknown>)[key] = coerceList(value)
+      continue
+    }
+    if (NUMBER_FIELDS.has(key)) {
+      const n = Number(value)
+      if (!Number.isNaN(n)) (patch as Record<string, unknown>)[key] = n
+      continue
+    }
+    if (DATE_FIELDS.has(key)) {
+      ;(patch as Record<string, unknown>)[key] = CLEAR_TOKENS.has(value.trim().toLowerCase()) ? '' : value.trim()
+      continue
+    }
+    // Plain string field (title, status, priority, description, type, …).
+    ;(patch as Record<string, unknown>)[key] = value
+  }
+
+  if (hasCustom) patch.customFields = customFields
+  return patch
 }
