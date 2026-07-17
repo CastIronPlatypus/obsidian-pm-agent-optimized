@@ -90,6 +90,52 @@ describe('shift --dry-run', () => {
   })
 })
 
+describe('shift cascade suppression (--no-cascade / --no-schedule)', () => {
+  // A has a subtask (moves via subtree cascade) and a downstream dependent B
+  // (moves only via the scheduler pass). The two flags carve the cascade apart.
+  async function seedChain(vault: string) {
+    const proj = await seedProject(vault)
+    const a = await seedTask(vault, proj, 'A')
+    const sub = await seedTask(vault, proj, 'A subtask', a.id)
+    const b = await seedTask(vault, proj, 'B')
+    await run(vault, ['set', a.id, 'due=2026-08-01'])
+    await run(vault, ['set', sub.id, 'due=2026-08-01'])
+    await run(vault, ['set', b.id, 'due=2026-08-02'])
+    // Wire the dependency WITHOUT triggering the scheduler, so B stays at 2026-08-02
+    // until the shift-under-test decides whether to reschedule it. (Also exercises
+    // --no-schedule on `depend`.)
+    await run(vault, ['depend', b.id, '--on', a.id, '--no-schedule'])
+    return { a, sub, b }
+  }
+
+  it('POSITIVE CONTROL: a plain shift cascades to the subtree AND downstream dependents', async () => {
+    const vault = makeVault()
+    const { a, sub, b } = await seedChain(vault)
+    await run(vault, ['shift', a.id, '+7d'])
+    expect(fm(vault, a.filePath).due).toBe('2026-08-08')
+    expect(fm(vault, sub.filePath).due, 'subtree moves with its parent').toBe('2026-08-08')
+    expect(fm(vault, b.filePath).due, 'downstream dependent reschedules').not.toBe('2026-08-02')
+  })
+
+  it('--no-cascade moves ONLY the item — no subtree, no downstream', async () => {
+    const vault = makeVault()
+    const { a, sub, b } = await seedChain(vault)
+    await run(vault, ['shift', a.id, '+7d', '--no-cascade'])
+    expect(fm(vault, a.filePath).due, 'the item itself moves').toBe('2026-08-08')
+    expect(fm(vault, sub.filePath).due, 'subtree is NOT moved under --no-cascade').toBe('2026-08-01')
+    expect(fm(vault, b.filePath).due, 'downstream is NOT rescheduled under --no-cascade').toBe('2026-08-02')
+  })
+
+  it('--no-schedule moves item + subtree but skips the downstream scheduler pass', async () => {
+    const vault = makeVault()
+    const { a, sub, b } = await seedChain(vault)
+    await run(vault, ['shift', a.id, '+7d', '--no-schedule'])
+    expect(fm(vault, a.filePath).due, 'the item itself moves').toBe('2026-08-08')
+    expect(fm(vault, sub.filePath).due, 'subtree still moves (it is part of the shift)').toBe('2026-08-08')
+    expect(fm(vault, b.filePath).due, 'downstream is NOT rescheduled under --no-schedule').toBe('2026-08-02')
+  })
+})
+
 describe('mv (reparent)', () => {
   it('reparents a task under a new parent', async () => {
     const vault = makeVault()

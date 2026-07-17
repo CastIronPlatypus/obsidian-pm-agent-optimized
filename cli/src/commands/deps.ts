@@ -73,6 +73,9 @@ async function writeDeps(
 ): Promise<HandlerOutput> {
   if (flagBool(cmd.flags, 'dry-run')) return { data: { id: taskId, dependencies: next }, changed_ids: [taskId] }
   await ctx.store.updateTask(project, taskId, { dependencies: next })
-  const scheduled = flagBool(cmd.flags, 'no-cascade') ? [] : await cascadeAfterMutation(ctx, project, taskId)
+  const scheduled =
+    flagBool(cmd.flags, 'no-cascade') || flagBool(cmd.flags, 'no-schedule')
+      ? []
+      : await cascadeAfterMutation(ctx, project, taskId)
   return { data: { id: taskId, dependencies: next, scheduled }, changed_ids: [...new Set([taskId, ...scheduled])] }
 }

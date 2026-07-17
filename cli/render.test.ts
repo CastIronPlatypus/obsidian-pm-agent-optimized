@@ -155,6 +155,20 @@ describe('render: tree', () => {
     expect(bareLine).not.toContain('✎')
   })
 
+  it('GAP-2 REGRESSION: a childful parent whose only body is the auto ## Subtasks mirror shows NO ✎', async () => {
+    const vault = makeVault()
+    const fx = await seed(vault)
+    // The milestone has children, so the store writes a `## Subtasks` checklist
+    // mirror into its body — but that is managed scaffolding, not human notes.
+    // ✎ must stay off (else it "just shows on everything," the failure the spec
+    // explicitly forbids), while ▸N still proves the parent HAS children.
+    const r = await run(vault, ['tree', fx.milestone, '--sub'])
+    const mLine = lineWithId(r.stdout, fx.milestone)
+    expect(mLine, 'milestone row present').toBeDefined()
+    expect(mLine, 'the ## Subtasks mirror must not count as readable content').not.toContain('✎')
+    expect(mLine, 'the parent still reports its child count').toMatch(/▸\d+/)
+  })
+
   it('NEGATIVE CONTROL: appending prose to the bare child makes ✎ appear on its row', async () => {
     const vault = makeVault()
     const fx = await seed(vault)

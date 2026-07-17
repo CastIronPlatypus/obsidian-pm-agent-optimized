@@ -129,7 +129,11 @@ async function shapeLineage(
   const rows: ViewRow[] = []
   for (const { project, items } of groups.values()) {
     rows.push({ depth: 0, isHeader: true, id: project.id, title: project.title })
-    items.sort((a, b) => a.lin.length - b.lin.length || pathKey(a.lin, a.task).localeCompare(pathKey(b.lin, b.task)))
+    // Pre-order (DFS) by full lineage path so every child renders directly under
+    // its own ancestor, never after an unrelated shallower sibling. A parent's
+    // path is a prefix of its child's, so prefixes sort first — parents precede
+    // children and each subtree stays contiguous.
+    items.sort((a, b) => pathKey(a.lin, a.task).localeCompare(pathKey(b.lin, b.task)))
     const emitted = new Set<string>()
     for (const { task, lin } of items) {
       for (let i = 1; i < lin.length; i++) {
@@ -583,7 +587,8 @@ export async function show(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerO
     show('tags', t.tags)
     show('dependencies', t.dependencies)
   }
-  if (body.trim()) lines.push('', body.trim())
+  // --fields trims the body too: only show it when unfiltered or explicitly asked.
+  if (body.trim() && (!fields.length || fields.includes('description'))) lines.push('', body.trim())
   return { data: entity, view: { format: 'plain', text: lines.join('\n') } }
 }
 

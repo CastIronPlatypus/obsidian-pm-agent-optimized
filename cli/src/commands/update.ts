@@ -53,7 +53,8 @@ export async function set(ctx: PmContext, cmd: ParsedCommand): Promise<HandlerOu
   const all = await ctx.store.discoverProjects()
   const located = resolveHandle(all, handle)
   const dryRun = flagBool(cmd.flags, 'dry-run')
-  const noCascade = flagBool(cmd.flags, 'no-cascade')
+  // Both --no-cascade and --no-schedule suppress the post-mutation scheduler pass.
+  const noCascade = flagBool(cmd.flags, 'no-cascade') || flagBool(cmd.flags, 'no-schedule')
 
   const parsed = parseJsonPatch(jsonPatch)
 
@@ -148,7 +149,7 @@ function convenience(field: string): (ctx: PmContext, cmd: ParsedCommand) => Pro
     const patch = coercePatch({ [field]: value })
     return applyTaskPatch(ctx, located.project, located.task.id, patch, {
       dryRun: flagBool(cmd.flags, 'dry-run'),
-      noCascade: flagBool(cmd.flags, 'no-cascade')
+      noCascade: flagBool(cmd.flags, 'no-cascade') || flagBool(cmd.flags, 'no-schedule')
     })
   }
 }
@@ -425,10 +426,14 @@ export async function shift(ctx: PmContext, cmd: ParsedCommand): Promise<Handler
   if (located.kind !== 'task') throw new PmError('E_NOT_FOUND', 'shift requires a task handle')
   const { project, task } = located
   const noCascade = flagBool(cmd.flags, 'no-cascade')
+  const noSchedule = flagBool(cmd.flags, 'no-schedule')
+  // --no-cascade → move ONLY the item (no subtree, no downstream). --no-schedule
+  // → move the item + subtree but skip the downstream scheduler pass.
+  const scheduleDownstream = !(noCascade || noSchedule)
   const statuses = ctx.store.configFor(project).statuses
 
   if (flagBool(cmd.flags, 'dry-run')) {
-    const moves = previewShift(project, task, delta, statuses, noCascade)
+    const moves = previewShift(project, task, delta, statuses, noCascade, scheduleDownstream)
     return {
       data: { id: task.id, delta, moves },
       changed_ids: moves.map((m) => m.id),
@@ -436,11 +441,11 @@ export async function shift(ctx: PmContext, cmd: ParsedCommand): Promise<Handler
     }
   }
 
-  // Real move: the store shifts the task (+ subtree unless --no-cascade) and runs
-  // one scheduler pass so downstream dependents cascade. Diff to name the movers.
+  // Real move: the store shifts the task (+ subtree unless --no-cascade) and, when
+  // not suppressed, runs one scheduler pass so downstream dependents cascade.
   const before = new Map<string, string>()
   for (const f of flattenTasks(project.tasks)) before.set(f.task.id, `${f.task.start}|${f.task.due}`)
-  await ctx.store.shiftTaskDates(project, task.id, delta, { cascadeSubtree: !noCascade })
+  await ctx.store.shiftTaskDates(project, task.id, delta, { cascadeSubtree: !noCascade, scheduleDownstream })
   const moved: string[] = []
   for (const f of flattenTasks(project.tasks)) {
     if (before.get(f.task.id) !== `${f.task.start}|${f.task.due}`) moved.push(f.task.id)
@@ -459,7 +464,8 @@ function previewShift(
   task: Task,
   delta: number,
   statuses: ReturnType<PmContext['store']['configFor']>['statuses'],
-  noCascade: boolean
+  noCascade: boolean,
+  scheduleDownstream = true
 ): ShiftMove[] {
   const orig = new Map<string, { start: string; due: string; title: string }>()
   for (const f of flattenTasks(project.tasks)) {
@@ -480,8 +486,9 @@ function previewShift(
       }
     }
   }
-  // One scheduler pass over the shifted clone → dependents' new dates.
-  const { patches } = computeSchedule(clone.tasks, task.id, statuses)
+  // One scheduler pass over the shifted clone → dependents' new dates (skipped
+  // when the downstream cascade is suppressed, so the preview matches the write).
+  const patches = scheduleDownstream ? computeSchedule(clone.tasks, task.id, statuses).patches : []
   for (const p of patches) {
     const t = findTaskById(clone, p.taskId)
     if (t) {
