@@ -48,6 +48,8 @@ export class ProjectView extends ItemView {
   private isAllProjects = false
   /** Aggregate mode: maps every task id to its real owning project (for edit redispatch). */
   private aggOwnerById = new Map<string, Project>()
+  /** Aggregate mode: every discovered project, for the Project filter options (incl. task-less ones). */
+  private aggProjects: Project[] = []
   /** The plugin handed to subviews. In aggregate mode its `store` redispatches edits. */
   private viewPlugin: PMPlugin
 
@@ -211,9 +213,10 @@ export class ProjectView extends ItemView {
   /** Load and render the synthetic "All Projects" aggregate. */
   private async loadAllProjectsView(): Promise<void> {
     this.isAllProjects = true
-    const { project, ownerById } = await buildAllProjectsProject(this.plugin.store, this.plugin.settings)
+    const { project, ownerById, realProjects } = await buildAllProjectsProject(this.plugin.store, this.plugin.settings)
     this.project = project
     this.aggOwnerById = ownerById
+    this.aggProjects = realProjects
     // Build the redispatching plugin once. The resolver reads the live map, so a
     // later rebuild that reassigns aggOwnerById keeps working without rebuilding.
     const aggStore = makeAggregateStore(this.plugin.store, (id) => this.aggOwnerById.get(id))
@@ -238,8 +241,9 @@ export class ProjectView extends ItemView {
 
   /** Rebuild the aggregate's tasks in place (after an edit or external change). */
   private async rebuildAggregate(): Promise<void> {
-    const { project, ownerById } = await buildAllProjectsProject(this.plugin.store, this.plugin.settings)
+    const { project, ownerById, realProjects } = await buildAllProjectsProject(this.plugin.store, this.plugin.settings)
     this.aggOwnerById = ownerById
+    this.aggProjects = realProjects
     if (this.project) {
       this.project.tasks = project.tasks
       this.project.taskIndex = project.taskIndex
@@ -302,7 +306,7 @@ export class ProjectView extends ItemView {
       project: this.project,
       statuses: config.statuses,
       priorities: config.priorities,
-      projectOptions: this.isAllProjects ? aggregateProjectOptions(this.aggOwnerById) : undefined,
+      projectOptions: this.isAllProjects ? aggregateProjectOptions(this.aggProjects) : undefined,
       filter: this.filter,
       activeSavedViewId: this.activeSavedViewId,
       onFilterChange: () => this.handleFilterMutation(),

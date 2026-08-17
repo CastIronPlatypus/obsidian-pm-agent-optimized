@@ -86,17 +86,25 @@ describe('buildAllProjectsProject', () => {
 })
 
 describe('aggregateProjectOptions', () => {
-  it('returns distinct owner projects sorted by title', () => {
+  it('returns distinct projects sorted by title', () => {
     const { p1, p2 } = twoProjects()
-    const ownerById = new Map([
-      ['t1', p1],
-      ['t2', p1],
-      ['t3', p2]
-    ])
-    expect(aggregateProjectOptions(ownerById)).toEqual([
+    expect(aggregateProjectOptions([p2, p1])).toEqual([
       { id: 'p1', label: 'Alpha' },
       { id: 'p2', label: 'Beta' }
     ])
+  })
+
+  it('includes projects that have no tasks (regression: dropdown listed only task-bearing projects)', () => {
+    const withTasks = project('p1', 'Alpha', [task('t1')])
+    const empty = project('p2', 'Empty', [])
+    const options = aggregateProjectOptions([withTasks, empty])
+    expect(options.map((o) => o.id)).toEqual(['p1', 'p2'])
+  })
+
+  it('dedupes projects discovered under the same id', () => {
+    const a = project('p1', 'Alpha', [])
+    const dup = project('p1', 'Alpha', [])
+    expect(aggregateProjectOptions([a, dup])).toEqual([{ id: 'p1', label: 'Alpha' }])
   })
 })
 

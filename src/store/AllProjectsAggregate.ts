@@ -67,10 +67,14 @@ export async function buildAllProjectsProject(store: TaskSource, settings: PMSet
   return { project, ownerById, realProjects }
 }
 
-/** Distinct owner projects present in the aggregate, for the Project filter dropdown. */
-export function aggregateProjectOptions(ownerById: Map<string, Project>): { id: string; label: string }[] {
+/**
+ * Options for the Project filter dropdown: EVERY discovered project (deduped by
+ * id), sorted by title. Built from the full project list — not from the task
+ * owner map — so projects with no tasks are still listed.
+ */
+export function aggregateProjectOptions(projects: Project[]): { id: string; label: string }[] {
   const seen = new Map<string, string>()
-  for (const project of ownerById.values()) {
+  for (const project of projects) {
     if (!seen.has(project.id)) seen.set(project.id, project.title)
   }
   return [...seen.entries()].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label))
