@@ -5,6 +5,7 @@ import { safeAsync, isTerminalStatus } from '../utils'
 import { openProjectModal } from '../ui/ModalFactory'
 import { EmptyState } from '../ui/primitives/EmptyState'
 import { ProjectCard } from '../ui/composites/ProjectCard'
+import { ALL_PROJECTS_COLOR, ALL_PROJECTS_ICON, ALL_PROJECTS_TITLE } from '../store/AllProjectsAggregate'
 
 export interface ProjectListContext {
   plugin: PMPlugin
@@ -29,6 +30,13 @@ export async function renderProjectListContent(ctx: ProjectListContext): Promise
   if (ctx.isStale()) return
   ctx.contentEl.empty()
 
+  const grid = ctx.contentEl.createDiv('pm-project-grid')
+
+  // Always-present synthetic "All Projects" card: an aggregated view across every
+  // project (see store/AllProjectsAggregate). Rendered first, even with no real
+  // projects yet, so the entry is permanent.
+  renderAllProjectsCard(ctx, grid, projects)
+
   if (projects.length === 0) {
     new EmptyState(ctx.contentEl)
       .setIcon('📋')
@@ -38,7 +46,6 @@ export async function renderProjectListContent(ctx: ProjectListContext): Promise
     return
   }
 
-  const grid = ctx.contentEl.createDiv('pm-project-grid')
   for (const project of projects) {
     const statuses = ctx.plugin.store.configFor(project).statuses
     const total = countTasks(project.tasks, false, statuses)
@@ -56,6 +63,26 @@ export async function renderProjectListContent(ctx: ProjectListContext): Promise
       onContextMenu: (e) => openProjectContextMenu(ctx, project, e)
     })
   }
+}
+
+function renderAllProjectsCard(ctx: ProjectListContext, grid: HTMLElement, projects: Project[]): void {
+  let total = 0
+  let done = 0
+  for (const project of projects) {
+    const statuses = ctx.plugin.store.configFor(project).statuses
+    total += countTasks(project.tasks, false, statuses)
+    done += countTasks(project.tasks, true, statuses)
+  }
+  new ProjectCard(grid, {
+    title: ALL_PROJECTS_TITLE,
+    icon: ALL_PROJECTS_ICON,
+    color: ALL_PROJECTS_COLOR,
+    tasksDone: done,
+    tasksTotal: total,
+    onClick: safeAsync(() => ctx.plugin.router.openAllProjects()),
+    // No edit/delete for the synthetic project.
+    onContextMenu: () => {}
+  })
 }
 
 function openCreateProjectModal(ctx: ProjectListContext): void {

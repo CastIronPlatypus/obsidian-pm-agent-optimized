@@ -10,6 +10,12 @@ import { KanbanView } from './KanbanView'
 import { openProjectModal, openTaskModal } from '../ui/ModalFactory'
 import { ViewSwitcher } from '../ui/primitives/ViewSwitcher'
 import { ProjectHeader } from '../ui/composites/ProjectHeader'
+import {
+  ALL_PROJECTS_PATH,
+  aggregateProjectOptions,
+  buildAllProjectsProject,
+  makeAggregateStore
+} from '../store/AllProjectsAggregate'
 
 export const PM_PROJECT_VIEW_TYPE = 'pm-project'
 
@@ -38,10 +44,17 @@ export class ProjectView extends ItemView {
   private initialized = false
   /** File path whose default view mode has been applied, so reloads don't reset a user's mode switch. */
   private defaultViewAppliedFor: string | null = null
+  /** True when this view is showing the synthetic "All Projects" aggregate. */
+  private isAllProjects = false
+  /** Aggregate mode: maps every task id to its real owning project (for edit redispatch). */
+  private aggOwnerById = new Map<string, Project>()
+  /** The plugin handed to subviews. In aggregate mode its `store` redispatches edits. */
+  private viewPlugin: PMPlugin
 
   constructor(leaf: WorkspaceLeaf, plugin: PMPlugin) {
     super(leaf)
     this.plugin = plugin
+    this.viewPlugin = plugin
     this.currentView = plugin.settings.defaultView
     this.navigation = false
   }
@@ -117,6 +130,8 @@ export class ProjectView extends ItemView {
 
     const reloadIfRelevant = (filePath: string) => {
       if (!this.project || !this.filePath) return false
+      // The aggregate spans every project, so any project-relevant file change is relevant.
+      if (this.isAllProjects) return this.plugin.store.isProjectRelevantPath(filePath)
       const taskFolder = this.filePath.replace(/\.md$/, '_tasks')
       return filePath.startsWith(taskFolder) || filePath === this.filePath
     }
@@ -165,6 +180,12 @@ export class ProjectView extends ItemView {
 
   private async loadProject(): Promise<void> {
     this.ensureInitialized()
+    if (this.filePath === ALL_PROJECTS_PATH) {
+      await this.loadAllProjectsView()
+      return
+    }
+    this.isAllProjects = false
+    this.viewPlugin = this.plugin
     const file = this.app.vault.getAbstractFileByPath(this.filePath)
     if (!(file instanceof TFile)) {
       this.renderMissingProject()
@@ -187,6 +208,48 @@ export class ProjectView extends ItemView {
     this.renderCurrentView()
   }
 
+  /** Load and render the synthetic "All Projects" aggregate. */
+  private async loadAllProjectsView(): Promise<void> {
+    this.isAllProjects = true
+    const { project, ownerById } = await buildAllProjectsProject(this.plugin.store, this.plugin.settings)
+    this.project = project
+    this.aggOwnerById = ownerById
+    // Build the redispatching plugin once. The resolver reads the live map, so a
+    // later rebuild that reassigns aggOwnerById keeps working without rebuilding.
+    const aggStore = makeAggregateStore(this.plugin.store, (id) => this.aggOwnerById.get(id))
+    this.viewPlugin = new Proxy(this.plugin, {
+      get: (target, prop) => {
+        if (prop === 'store') return aggStore
+        const value = target[prop as keyof PMPlugin]
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value
+      }
+    })
+    this.plugin.applyCollapsedState(this.project)
+    if (this.defaultViewAppliedFor !== this.filePath) {
+      this.defaultViewAppliedFor = this.filePath
+      this.currentView = this.plugin.store.configFor(this.project).defaultView
+    }
+    this.loadFilterFromSettings()
+    ;(this.leaf as WorkspaceLeaf & { updateHeader?: () => void }).updateHeader?.()
+    this.renderProjectToolbar()
+    this.renderProjectHeader()
+    this.renderCurrentView()
+  }
+
+  /** Rebuild the aggregate's tasks in place (after an edit or external change). */
+  private async rebuildAggregate(): Promise<void> {
+    const { project, ownerById } = await buildAllProjectsProject(this.plugin.store, this.plugin.settings)
+    this.aggOwnerById = ownerById
+    if (this.project) {
+      this.project.tasks = project.tasks
+      this.project.taskIndex = project.taskIndex
+      this.project.savedViews = project.savedViews
+    } else {
+      this.project = project
+    }
+    this.plugin.applyCollapsedState(this.project)
+  }
+
   private loadFilterFromSettings(): void {
     const saved = this.plugin.settings.projectFilters[this.filePath]
     if (saved) {
@@ -207,6 +270,20 @@ export class ProjectView extends ItemView {
     await this.plugin.saveSettings()
   }
 
+  /**
+   * Persist saved-view definitions. Real projects store them in their file's
+   * frontmatter; the aggregate has no file, so it persists to plugin settings.
+   */
+  private async persistSavedViews(): Promise<void> {
+    if (!this.project) return
+    if (this.isAllProjects) {
+      this.plugin.settings.allProjectsSavedViews = this.project.savedViews
+      await this.plugin.saveSettings()
+    } else {
+      await this.plugin.store.saveProject(this.project)
+    }
+  }
+
   private renderMissingProject(): void {
     this.toolbarEl.empty()
     this.headerEl.empty()
@@ -225,6 +302,7 @@ export class ProjectView extends ItemView {
       project: this.project,
       statuses: config.statuses,
       priorities: config.priorities,
+      projectOptions: this.isAllProjects ? aggregateProjectOptions(this.aggOwnerById) : undefined,
       filter: this.filter,
       activeSavedViewId: this.activeSavedViewId,
       onFilterChange: () => this.handleFilterMutation(),
@@ -292,7 +370,7 @@ export class ProjectView extends ItemView {
     }
     this.project.savedViews.push(sv)
     this.activeSavedViewId = sv.id
-    await this.plugin.store.saveProject(this.project)
+    await this.persistSavedViews()
     void this.persistFilter()
     this.header?.refresh()
   }
@@ -308,7 +386,7 @@ export class ProjectView extends ItemView {
       sv.sortKey = ts.sortKey
       sv.sortDir = ts.sortDir
     }
-    await this.plugin.store.saveProject(this.project)
+    await this.persistSavedViews()
     this.header?.refresh()
   }
 
@@ -316,7 +394,7 @@ export class ProjectView extends ItemView {
     if (!this.project) return
     this.project.savedViews = this.project.savedViews.filter((v) => v.id !== id)
     if (this.activeSavedViewId === id) this.activeSavedViewId = null
-    await this.plugin.store.saveProject(this.project)
+    await this.persistSavedViews()
     void this.persistFilter()
     this.header?.refresh()
   }
@@ -333,28 +411,33 @@ export class ProjectView extends ItemView {
     const iconEl = left.createSpan({
       text: this.project.icon,
       cls: 'pm-toolbar-icon',
-      attr: { 'aria-label': 'Edit project', role: 'button', tabindex: '0' }
+      attr: this.isAllProjects ? {} : { 'aria-label': 'Edit project', role: 'button', tabindex: '0' }
     })
-    iconEl.addEventListener('click', () => {
-      openProjectModal(this.plugin, {
-        project: this.project,
-        onSave: (updated) => {
-          this.project = updated
-          this.renderProjectToolbar()
-        }
+    if (!this.isAllProjects) {
+      iconEl.addEventListener('click', () => {
+        openProjectModal(this.plugin, {
+          project: this.project,
+          onSave: (updated) => {
+            this.project = updated
+            this.renderProjectToolbar()
+          }
+        })
       })
-    })
+    }
 
     this.titleEl2 = left.createEl('h2', { text: this.project.title, cls: 'pm-toolbar-title' })
-    this.titleEl2.contentEditable = 'true'
-    this.titleEl2.addEventListener(
-      'blur',
-      safeAsync(async () => {
-        if (!this.project) return
-        this.project.title = this.titleEl2.textContent?.trim() ?? this.project.title
-        await this.plugin.store.saveProject(this.project)
-      })
-    )
+    // The aggregate has no file to persist a rename to; keep its title read-only.
+    if (!this.isAllProjects) {
+      this.titleEl2.contentEditable = 'true'
+      this.titleEl2.addEventListener(
+        'blur',
+        safeAsync(async () => {
+          if (!this.project) return
+          this.project.title = this.titleEl2.textContent?.trim() ?? this.project.title
+          await this.plugin.store.saveProject(this.project)
+        })
+      )
+    }
 
     new ViewSwitcher<ViewMode>(this.toolbarEl, {
       options: [
@@ -370,6 +453,11 @@ export class ProjectView extends ItemView {
     })
 
     const right = this.toolbarEl.createDiv('pm-toolbar-right')
+    // The aggregate can't own a brand-new top-level task (no target project) and
+    // has no settings file, so those affordances are omitted. Editing existing
+    // tasks and adding subtasks (parent known) still work through the row menus.
+    if (this.isAllProjects) return
+
     new ButtonComponent(right)
       .setButtonText('+ add task')
       .setCta()
@@ -438,7 +526,7 @@ export class ProjectView extends ItemView {
         const table = new TableView(
           this.bodyEl,
           this.project,
-          this.plugin,
+          this.viewPlugin,
           () => this.refreshProject(),
           this.filter,
           this.savedTableViewState ?? undefined
@@ -448,14 +536,26 @@ export class ProjectView extends ItemView {
         break
       }
       case 'gantt': {
-        const gantt = new GanttView(this.bodyEl, this.project, this.plugin, () => this.refreshProject(), this.filter)
+        const gantt = new GanttView(
+          this.bodyEl,
+          this.project,
+          this.viewPlugin,
+          () => this.refreshProject(),
+          this.filter
+        )
         if (savedGanttScroll) gantt.setPendingScroll(savedGanttScroll)
         if (savedGanttLabelWidth !== null) gantt.setLabelWidth(savedGanttLabelWidth)
         this.subview = gantt
         break
       }
       case 'kanban':
-        this.subview = new KanbanView(this.bodyEl, this.project, this.plugin, () => this.refreshProject(), this.filter)
+        this.subview = new KanbanView(
+          this.bodyEl,
+          this.project,
+          this.viewPlugin,
+          () => this.refreshProject(),
+          this.filter
+        )
         break
     }
     this.bodyEl.toggleClass('pm-content--kanban', this.currentView === 'kanban')
@@ -475,6 +575,9 @@ export class ProjectView extends ItemView {
       window.clearTimeout(this.reloadDebounceTimer)
       this.reloadDebounceTimer = null
     }
+    // Aggregate edits land in the real projects' trees, not in this synthetic
+    // one, so rebuild it from disk before re-rendering.
+    if (this.isAllProjects) await this.rebuildAggregate()
     if (this.subview?.refresh) {
       this.subview.refresh()
     } else if (this.subview) {

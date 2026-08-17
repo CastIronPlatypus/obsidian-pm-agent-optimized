@@ -7,6 +7,8 @@ export interface ProjectHeaderProps {
   project: Project
   statuses: StatusConfig[]
   priorities: PriorityConfig[]
+  /** Owner-project filter options; present only in the "All Projects" aggregate. */
+  projectOptions?: { id: string; label: string }[]
   filter: FilterState
   activeSavedViewId: string | null
   onFilterChange: () => void
@@ -87,6 +89,7 @@ export class ProjectHeader {
       project: this.props.project,
       statuses: this.props.statuses,
       priorities: this.props.priorities,
+      projectOptions: this.props.projectOptions,
       filter: this.props.filter,
       onFilterChange: this.props.onFilterChange,
       onClear: this.props.onClearFilter

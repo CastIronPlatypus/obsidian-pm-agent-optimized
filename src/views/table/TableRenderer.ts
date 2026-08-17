@@ -1,5 +1,6 @@
 import type PMPlugin from '../../main'
 import type { Project, FilterState, PriorityConfig, StatusConfig } from '../../types'
+import { ALL_PROJECTS_ID } from '../../store/AllProjectsAggregate'
 import { type FlatTask, flattenTasks } from '../../store/TaskTreeOps'
 import { findTaskById } from '../../store/TaskIndex'
 import { applyTaskFilterFlat, isFilterActive } from '../../store/TaskFilter'
@@ -8,7 +9,7 @@ import { renderAddButton } from '../../ui/composites/addButton'
 import { compareTask } from './TableFilters'
 import { renderTaskRow, updateSelectedRow, updateSelectAllCheckbox } from './TableRow'
 
-type SortKey = 'title' | 'status' | 'priority' | 'due' | 'assignees' | 'progress'
+type SortKey = 'title' | 'status' | 'priority' | 'due' | 'assignees' | 'progress' | 'project'
 type SortDir = 'asc' | 'desc'
 
 export type { SortKey, SortDir }
@@ -48,6 +49,11 @@ export interface TableContext {
   onRefresh: () => Promise<void>
   onSelectionChange: () => void
   onBulkDelete: () => void
+}
+
+/** True for the synthetic "All Projects" aggregate, which shows an extra Project column. */
+export function isAggregateView(project: Project): boolean {
+  return project.id === ALL_PROJECTS_ID
 }
 
 export function renderTable(ctx: TableContext): void {
@@ -91,6 +97,7 @@ export function renderTable(ctx: TableContext): void {
   const cols: { key: SortKey | null; label: string; width?: string }[] = [
     { key: null, label: '', width: '32px' },
     { key: 'title', label: 'Task', width: 'auto' },
+    ...(isAggregateView(ctx.project) ? [{ key: 'project' as const, label: 'Project', width: '150px' }] : []),
     { key: 'status', label: 'Status', width: '130px' },
     { key: 'priority', label: 'Priority', width: '110px' },
     { key: 'assignees', label: 'Assignees', width: '140px' },
@@ -228,7 +235,7 @@ function renderWindowRows(ctx: TableContext): void {
   if (!tbody) return
 
   const rows = state.visibleRows
-  const colCount = 10 + ctx.project.customFields.length
+  const colCount = 10 + (isAggregateView(ctx.project) ? 1 : 0) + ctx.project.customFields.length
   const { start, end } = computeWindow(state)
   state.windowStart = start
   state.windowEnd = end
@@ -240,12 +247,15 @@ function renderWindowRows(ctx: TableContext): void {
   }
   if (end < rows.length) spacerRow(tbody, colCount, (rows.length - end) * state.rowHeight)
 
-  // "Add task" row
-  const addRow = tbody.createEl('tr', { cls: 'pm-table-add-row' })
-  const addCell = addRow.createEl('td', { attr: { colspan: String(colCount) } })
-  renderAddButton(addCell, 'Add task', () => {
-    openTaskModal(ctx.plugin, ctx.project, { onSave: () => ctx.onRefresh() })
-  })
+  // "Add task" row — omitted in the aggregate, where a new top-level task has no
+  // target project. Subtasks (parent known) are still addable from row menus.
+  if (!isAggregateView(ctx.project)) {
+    const addRow = tbody.createEl('tr', { cls: 'pm-table-add-row' })
+    const addCell = addRow.createEl('td', { attr: { colspan: String(colCount) } })
+    renderAddButton(addCell, 'Add task', () => {
+      openTaskModal(ctx.plugin, ctx.project, { onSave: () => ctx.onRefresh() })
+    })
+  }
 
   // Calibrate the estimated row height against a real painted row, exactly
   // once. Re-calibrating on every pass feeds back into the window math (row

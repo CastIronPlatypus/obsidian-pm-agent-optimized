@@ -10,6 +10,8 @@ export interface FilterRowProps {
   project: Project
   statuses: StatusConfig[]
   priorities: PriorityConfig[]
+  /** Owner-project filter options; present only in the "All Projects" aggregate. */
+  projectOptions?: { id: string; label: string }[]
   filter: FilterState
   onFilterChange: () => void
   onClear: () => void
@@ -65,6 +67,13 @@ export class FilterRow {
         notify()
       }
     )
+
+    if (this.props.projectOptions?.length) {
+      renderFilterDropdown(this.el, 'Project', filter.projects ?? [], this.props.projectOptions, (selected) => {
+        filter.projects = selected
+        notify()
+      })
+    }
 
     const allAssignees = collectAllAssignees(project.tasks)
     if (allAssignees.length) {

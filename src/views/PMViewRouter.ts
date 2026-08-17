@@ -1,5 +1,6 @@
 import { TFile } from 'obsidian'
 import type PMPlugin from '../main'
+import { ALL_PROJECTS_PATH } from '../store/AllProjectsAggregate'
 import { PM_DASHBOARD_VIEW_TYPE } from './DashboardView'
 import { PM_PROJECT_VIEW_TYPE } from './ProjectView'
 
@@ -23,5 +24,13 @@ export class PMViewRouter {
   async openProjectByPath(path: string): Promise<void> {
     const file = this.plugin.app.vault.getAbstractFileByPath(path)
     if (file instanceof TFile) await this.openProject(file)
+  }
+
+  /** Open the synthetic "All Projects" aggregate in a project view (no real file). */
+  async openAllProjects(): Promise<void> {
+    const ws = this.plugin.app.workspace
+    const leaf = ws.getLeaf('tab')
+    await leaf.setViewState({ type: PM_PROJECT_VIEW_TYPE, state: { filePath: ALL_PROJECTS_PATH } })
+    await ws.revealLeaf(leaf)
   }
 }

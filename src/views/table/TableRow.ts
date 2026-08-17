@@ -3,7 +3,7 @@ import { getStatusConfig, isTaskOverdue, isTerminalStatus, safeAsync, stringifyC
 import { totalLoggedHours } from '../../store/TaskTreeOps'
 import { today, parsePlainDate } from '../../dates'
 import type { Task } from '../../types'
-import { updateSelectCheckboxes, getVisibleTaskIds } from './TableRenderer'
+import { updateSelectCheckboxes, getVisibleTaskIds, isAggregateView } from './TableRenderer'
 import type { TableContext, TableState } from './TableRenderer'
 import { openTaskModal } from '../../ui/ModalFactory'
 import { buildTaskContextMenu } from '../../ui/TaskContextMenu'
@@ -99,6 +99,10 @@ export function renderTaskRow(tbody: HTMLElement, task: Task, depth: number, ctx
       })
     }
   })
+
+  if (isAggregateView(ctx.project)) {
+    new CustomFieldCell(row, task.ownerProjectTitle ?? '')
+  }
 
   new StatusCell(row, {
     task,

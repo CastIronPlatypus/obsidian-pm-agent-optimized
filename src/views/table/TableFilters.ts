@@ -23,6 +23,8 @@ export function compareTask(
       return dir * (a.assignees[0] ?? '').localeCompare(b.assignees[0] ?? '')
     case 'progress':
       return dir * (a.progress - b.progress)
+    case 'project':
+      return dir * (a.ownerProjectTitle ?? '').localeCompare(b.ownerProjectTitle ?? '')
     default:
       return 0
   }

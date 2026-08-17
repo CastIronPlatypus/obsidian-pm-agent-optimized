@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An always-present "All Projects" card on the dashboard opens an aggregated view of every task, milestone, and subtask across all projects; it behaves like a normal project view (table, board, Gantt; fully editable — edits land in each item's own project) and adds a Project column, a Project filter (all views), and Project sorting (table), with its own saved views ([docs](docs/all-projects-view.md))
 - Priorities can be added, renamed, recolored, and reordered in settings
 - Status and priority icons accept emoji or any icon available in Obsidian, including Lucide icons and icons added by other plugins, with suggestions while typing in settings
 - TaskNotes tasks can be imported with their dates, dependencies, subtasks, tags, and archive state ([#16](https://github.com/StepanKropachev/obsidian-pm/issues/16))
