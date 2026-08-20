@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_SETTINGS, makeDefaultFilter, makeTask, type PMSettings, type Project, type Task } from '../types'
+import {
+  DEFAULT_SETTINGS,
+  makeDefaultFilter,
+  makeTask,
+  type PMSettings,
+  type Project,
+  type StatusConfig,
+  type Task
+} from '../types'
 import type { TaskSource } from './TaskSource'
 import { matchesFilter } from './TaskFilter'
 import { compareTask } from '../views/table/TableFilters'
@@ -8,8 +16,11 @@ import {
   ALL_PROJECTS_ID,
   ALL_PROJECTS_PATH,
   aggregateProjectOptions,
+  aggregateStatusFilterGroups,
+  aggregateStatusesForTask,
   buildAllProjectsProject,
-  makeAggregateStore
+  makeAggregateStore,
+  unionStatuses
 } from './AllProjectsAggregate'
 
 function task(id: string, over: Partial<Task> = {}): Task {
@@ -105,6 +116,84 @@ describe('aggregateProjectOptions', () => {
     const a = project('p1', 'Alpha', [])
     const dup = project('p1', 'Alpha', [])
     expect(aggregateProjectOptions([a, dup])).toEqual([{ id: 'p1', label: 'Alpha' }])
+  })
+})
+
+describe('unionStatuses', () => {
+  const status = (id: string, label: string): StatusConfig => ({ id, label, color: '#000', icon: '', complete: false })
+
+  function projectWithStatuses(id: string, title: string, statuses: StatusConfig[]): Project {
+    return { ...project(id, title, []), config: { statuses } }
+  }
+
+  it('seeds with the global palette, then appends project-specific ids with their real labels', () => {
+    const global = [status('todo', 'To Do'), status('done', 'Done')]
+    const thrivalist = projectWithStatuses('p1', 'Thrivalist', [
+      status('todo', 'Ready'), // shared id → global label wins
+      status('status-ey7uke', 'Certified') // project-specific id → real label surfaces
+    ])
+    const options = unionStatuses([thrivalist], settings({ statuses: global }))
+    expect(options.map((s) => `${s.id}:${s.label}`)).toEqual(['todo:To Do', 'done:Done', 'status-ey7uke:Certified'])
+  })
+
+  it('lists every status id exactly once across projects', () => {
+    const global = [status('todo', 'To Do')]
+    const a = projectWithStatuses('p1', 'A', [status('x', 'X-from-A')])
+    const b = projectWithStatuses('p2', 'B', [status('x', 'X-from-B'), status('y', 'Y')])
+    const ids = unionStatuses([a, b], settings({ statuses: global })).map((s) => s.id)
+    expect(ids).toEqual(['todo', 'x', 'y'])
+  })
+})
+
+describe('aggregateStatusFilterGroups', () => {
+  const status = (id: string, label: string): StatusConfig => ({ id, label, color: '#000', icon: '', complete: false })
+  const withStatuses = (id: string, title: string, statuses: StatusConfig[]): Project => ({
+    ...project(id, title, []),
+    config: { statuses }
+  })
+
+  it('collapses same-label statuses across projects into one group carrying every underlying id', () => {
+    const a = withStatuses('p1', 'A', [status('done', 'Done')])
+    const b = withStatuses('p2', 'B', [status('status-x', 'Done'), status('status-y', 'Shipped')])
+    const groups = aggregateStatusFilterGroups([a, b], settings({ statuses: [] }))
+    expect(groups.map((g) => g.label)).toEqual(['Done', 'Shipped'])
+    // The two projects' different ids for "Done" both land under the one chip.
+    expect(groups.find((g) => g.label === 'Done')?.ids).toEqual(['done', 'status-x'])
+    expect(groups.find((g) => g.label === 'Shipped')?.ids).toEqual(['status-y'])
+  })
+
+  it('does not repeat an id when a project lists it twice', () => {
+    const a = withStatuses('p1', 'A', [status('done', 'Done')])
+    const b = withStatuses('p2', 'B', [status('done', 'Done')])
+    expect(aggregateStatusFilterGroups([a, b], settings({ statuses: [] }))).toEqual([
+      { label: 'Done', display: 'Done', ids: ['done'] }
+    ])
+  })
+})
+
+describe('aggregateStatusesForTask', () => {
+  const status = (id: string, label: string): StatusConfig => ({ id, label, color: '#000', icon: '', complete: false })
+
+  it('resolves each task to ITS OWN project palette, even when two projects reuse one status id', async () => {
+    const a: Project = {
+      ...project('p1', 'A', [task('ta', { status: 's' })]),
+      config: { statuses: [status('s', 'Alpha')] }
+    }
+    const b: Project = {
+      ...project('p2', 'B', [task('tb', { status: 's' })]),
+      config: { statuses: [status('s', 'Beta')] }
+    }
+    const { project: agg } = await buildAllProjectsProject(fakeStore([a, b]), settings({ statuses: [] }))
+
+    const ta = agg.tasks.find((t) => t.id === 'ta') as Task
+    const tb = agg.tasks.find((t) => t.id === 'tb') as Task
+    expect(aggregateStatusesForTask(agg, ta)?.map((s) => s.label)).toEqual(['Alpha'])
+    expect(aggregateStatusesForTask(agg, tb)?.map((s) => s.label)).toEqual(['Beta'])
+  })
+
+  it('returns null for a task with no owner (falls back to the union palette)', async () => {
+    const { project: agg } = await buildAllProjectsProject(fakeStore([]), settings())
+    expect(aggregateStatusesForTask(agg, task('orphan'))).toBeNull()
   })
 })
 

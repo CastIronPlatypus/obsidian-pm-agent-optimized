@@ -13,6 +13,7 @@ import { ProjectHeader } from '../ui/composites/ProjectHeader'
 import {
   ALL_PROJECTS_PATH,
   aggregateProjectOptions,
+  aggregateStatusFilterGroups,
   buildAllProjectsProject,
   makeAggregateStore
 } from '../store/AllProjectsAggregate'
@@ -307,6 +308,9 @@ export class ProjectView extends ItemView {
       statuses: config.statuses,
       priorities: config.priorities,
       projectOptions: this.isAllProjects ? aggregateProjectOptions(this.aggProjects) : undefined,
+      statusFilterGroups: this.isAllProjects
+        ? aggregateStatusFilterGroups(this.aggProjects, this.plugin.settings)
+        : undefined,
       filter: this.filter,
       activeSavedViewId: this.activeSavedViewId,
       onFilterChange: () => this.handleFilterMutation(),

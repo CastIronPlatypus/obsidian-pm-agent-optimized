@@ -4,6 +4,7 @@ import { totalLoggedHours } from '../../store/TaskTreeOps'
 import { today, parsePlainDate } from '../../dates'
 import type { Task } from '../../types'
 import { updateSelectCheckboxes, getVisibleTaskIds, isAggregateView } from './TableRenderer'
+import { aggregateStatusesForTask } from '../../store/AllProjectsAggregate'
 import type { TableContext, TableState } from './TableRenderer'
 import { openTaskModal } from '../../ui/ModalFactory'
 import { buildTaskContextMenu } from '../../ui/TaskContextMenu'
@@ -23,8 +24,12 @@ import { TitleCell } from '../../ui/composites/cells/TitleCell'
 // ─── Row orchestrator ──────────────────────────────────────────────────────────
 
 export function renderTaskRow(tbody: HTMLElement, task: Task, depth: number, ctx: TableContext): void {
-  const isDone = isTerminalStatus(task.status, ctx.statuses)
-  const statusConfig = getStatusConfig(ctx.statuses, task.status)
+  // In the aggregate a task carries its own project's palette; single-project
+  // views share ctx.statuses. Resolve status label/colour/`complete` against the
+  // task's OWN statuses so an "All Projects" row is never mislabelled by a shared id.
+  const statuses = aggregateStatusesForTask(ctx.project, task) ?? ctx.statuses
+  const isDone = isTerminalStatus(task.status, statuses)
+  const statusConfig = getStatusConfig(statuses, task.status)
 
   const { el: row } = new TaskRow(tbody, {
     taskId: task.id,
@@ -106,7 +111,7 @@ export function renderTaskRow(tbody: HTMLElement, task: Task, depth: number, ctx
 
   new StatusCell(row, {
     task,
-    statuses: ctx.statuses,
+    statuses,
     onChange: safeAsync(async (status) => {
       await ctx.plugin.store.updateTask(ctx.project, task.id, { status })
       await ctx.onRefresh()
@@ -125,7 +130,7 @@ export function renderTaskRow(tbody: HTMLElement, task: Task, depth: number, ctx
   new AssigneesCell(row, task.assignees)
 
   const due = parsePlainDate(task.due)
-  const overdue = isTaskOverdue(task, ctx.statuses)
+  const overdue = isTaskOverdue(task, statuses)
   const isNear = !overdue && due !== null && due.since(today(), { largestUnit: 'days' }).days < 3
   new DueDateCell(row, {
     task,
