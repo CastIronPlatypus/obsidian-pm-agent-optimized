@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The import dialog offered the built-in statuses and priorities instead of the configured ones
+- In the All Projects view, each task now shows and edits its status using its own project's statuses — real label, colour, and completion — instead of a merged palette that could display a raw id or the wrong label; clicking a status offers exactly the options valid in that task's project. The All Projects status filter now lists one entry per distinct status name and matches tasks whose resolved status has that name across every project ([#57](https://github.com/StepanKropachev/obsidian-pm/issues/57))
 
 ## [1.8.0] - 2026-07-03
 

@@ -1,7 +1,9 @@
 import { Notice } from 'obsidian'
-import type { PMSettings, Project, Task } from '../types'
+import type { PMSettings, Project, StatusConfig, Task } from '../types'
 import type { TaskSource } from './TaskSource'
+import { resolveProjectConfig } from './ProjectConfig'
 import { buildTaskIndex } from './TaskIndex'
+import { formatBadgeText } from '../utils'
 
 /**
  * The synthetic "All Projects" pseudo-project. It is never a real vault file:
@@ -26,6 +28,78 @@ function tagSubtree(tasks: Task[], project: Project, ownerById: Map<string, Proj
   }
 }
 
+/**
+ * Union of every project's *resolved* statuses, deduped by id. Status ids are
+ * project-scoped: two projects can reuse one id (e.g. `done`) with different
+ * labels/colors/`complete` flags. A filter matches on the id, so each id can
+ * appear only once — we seed with the global palette (so shared ids keep their
+ * familiar global label and order), then append each project's statuses for ids
+ * the global palette does not define (so a project-specific status such as
+ * `status-ey7uke` surfaces with its real label, "Certified", instead of a raw id).
+ */
+export function unionStatuses(realProjects: Project[], settings: PMSettings): StatusConfig[] {
+  const byId = new Map<string, StatusConfig>()
+  for (const status of settings.statuses) if (!byId.has(status.id)) byId.set(status.id, status)
+  for (const real of realProjects) {
+    for (const status of resolveProjectConfig(real, settings).statuses) {
+      if (!byId.has(status.id)) byId.set(status.id, status)
+    }
+  }
+  return [...byId.values()]
+}
+
+/**
+ * One entry per DISTINCT status label across every project, in first-seen order.
+ * The filter lists these (so two projects that both call a status "Done" show a
+ * single "Done" chip); selecting one matches any task whose resolved status has
+ * that label, so `ids` carries every project-scoped id that resolves to it.
+ */
+export interface StatusFilterGroup {
+  /** The shared display label, e.g. "Done". */
+  label: string
+  /** `formatBadgeText`-ready display text (icon + label) from the first status seen. */
+  display: string
+  /** Every status id, across all projects, whose resolved status carries this label. */
+  ids: string[]
+}
+
+/**
+ * Group every project's *resolved* statuses by display label. Unlike
+ * {@link unionStatuses} (which dedupes by id and so cannot see two projects'
+ * different ids for one shared label), this walks each project's full resolved
+ * palette, so the "All Projects" status filter can offer one chip per label and
+ * match it back to every underlying id.
+ */
+export function aggregateStatusFilterGroups(realProjects: Project[], settings: PMSettings): StatusFilterGroup[] {
+  const byLabel = new Map<string, StatusFilterGroup>()
+  for (const real of realProjects) {
+    for (const status of resolveProjectConfig(real, settings).statuses) {
+      const existing = byLabel.get(status.label)
+      if (existing) {
+        if (!existing.ids.includes(status.id)) existing.ids.push(status.id)
+      } else {
+        byLabel.set(status.label, {
+          label: status.label,
+          display: formatBadgeText(status.icon, status.label),
+          ids: [status.id]
+        })
+      }
+    }
+  }
+  return [...byLabel.values()]
+}
+
+/**
+ * The statuses in effect for one task inside the aggregate: its OWN project's
+ * resolved palette. Returns null outside the aggregate (no owner map) or when the
+ * task's owner is unknown, so callers fall back to the aggregate union palette.
+ */
+export function aggregateStatusesForTask(project: Project, task: Task): StatusConfig[] | null {
+  const owner = task.ownerProjectId
+  if (!owner) return null
+  return project.aggregateOwnerStatuses?.get(owner) ?? null
+}
+
 export interface AggregateResult {
   project: Project
   /** Maps every task/subtask id (across all projects) to its real owning project. */
@@ -43,9 +117,11 @@ export interface AggregateResult {
 export async function buildAllProjectsProject(store: TaskSource, settings: PMSettings): Promise<AggregateResult> {
   const realProjects = await store.loadAllProjects(settings.projectsFolder)
   const ownerById = new Map<string, Project>()
+  const ownerStatuses = new Map<string, StatusConfig[]>()
   const tasks: Task[] = []
   for (const real of realProjects) {
     tagSubtree(real.tasks, real, ownerById)
+    ownerStatuses.set(real.id, resolveProjectConfig(real, settings).statuses)
     tasks.push(...real.tasks)
   }
   const now = new Date().toISOString()
@@ -62,7 +138,13 @@ export async function buildAllProjectsProject(store: TaskSource, settings: PMSet
     updatedAt: now,
     filePath: ALL_PROJECTS_PATH,
     savedViews: [...settings.allProjectsSavedViews],
-    taskIndex: buildTaskIndex(tasks)
+    taskIndex: buildTaskIndex(tasks),
+    // Genuine override (not `materialized`) so `configFor` uses this union palette.
+    // The union is the fallback for anything that lacks a task-scoped palette
+    // (e.g. sorting, or a task whose owner project vanished); per-task display and
+    // editing instead read `aggregateOwnerStatuses` for each task's OWN palette.
+    config: { statuses: unionStatuses(realProjects, settings) },
+    aggregateOwnerStatuses: ownerStatuses
   }
   return { project, ownerById, realProjects }
 }

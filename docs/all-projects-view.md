@@ -18,6 +18,12 @@ field for filtering and sorting.
   - **Filter** — a "Project" dropdown in the filter row, in all three views.
   - **Sort** — a sortable **Project** column in the table view (table is the only view with sorting).
   - **Grouping** — none. The plugin has no grouping mechanism, and this change adds none.
+- **Resolves each task's status against its own project.** Every row shows and edits its status
+  using the palette of the project that owns it — real label, colour, and `complete` flag — so a
+  task never displays a raw id or another project's label. Clicking a status opens exactly the
+  statuses valid in that task's project. The **Status filter** lists one chip per distinct status
+  **label** (e.g. a single "Done" even when several projects define their own "Done"); selecting it
+  matches every task whose resolved status carries that label, across all projects.
 - **Persists its own saved views** (and active filter / collapsed state) across sessions, like a
   real project.
 
@@ -46,6 +52,25 @@ by owner). Reads and every non-mutating method pass straight through. `ProjectVi
 proxied store to its subviews in aggregate mode, so editing a status, date, etc. in the All Projects
 view writes back to the correct source project untouched.
 
+### Per-project status resolution
+
+Status ids are **project-scoped**: two projects can reuse one id (`done`) with different labels,
+colours, or `complete` flags, and each project can mint its own ids (`status-ey7uke`). A single
+merged palette therefore can't render every task faithfully.
+
+- `buildAllProjectsProject` attaches `aggregateOwnerStatuses` to the synthetic project — a map from
+  each real project's id to its fully **resolved** status palette (`resolveProjectConfig`).
+- When a row renders, `aggregateStatusesForTask(project, task)` looks the task's `ownerProjectId` up
+  in that map and hands the result to the badge, the click-to-edit dropdown, and the terminal /
+  overdue checks. It falls back to the aggregate's union palette (`config.statuses`) only when a task
+  has no owner (e.g. its project vanished).
+- The **Status filter** is built by `aggregateStatusFilterGroups`, which walks every project's
+  resolved palette and groups statuses by **label**, collecting every underlying id per label. The
+  filter row (`FilterRow`) renders one chip per label; toggling it adds/removes all of that label's
+  ids, so `matchesFilter` stays a plain id-membership test while the user sees a single, deduped
+  label. `unionStatuses` (deduped by id) remains the fallback palette for sorting and off-owner
+  tasks.
+
 ### Persistence — `data.json`, not a file
 
 The aggregate has no project file, so:
@@ -72,7 +97,8 @@ The aggregate has no project file, so:
 | Dashboard card | `src/views/ProjectListRenderer.ts` |
 | Routing | `src/views/PMViewRouter.ts` (`openAllProjects`) |
 | Load / rebuild / persist / toolbar gating | `src/views/ProjectView.ts` |
-| Project filter dropdown | `src/ui/composites/ProjectHeader/{ProjectHeader,FilterRow}.ts` |
-| Project column + sort | `src/views/table/{TableRenderer,TableRow,TableFilters}.ts` |
+| Project filter dropdown + label-grouped Status filter | `src/ui/composites/ProjectHeader/{ProjectHeader,FilterRow}.ts` |
+| Project column + sort, per-task status resolution | `src/views/table/{TableRenderer,TableRow,TableFilters}.ts` |
+| Per-task status palette + label groups | `aggregateStatusesForTask` / `aggregateStatusFilterGroups` in `src/store/AllProjectsAggregate.ts` |
 | Filter predicate | `src/store/TaskFilter.ts` |
 | Tests | `src/store/AllProjectsAggregate.test.ts` |

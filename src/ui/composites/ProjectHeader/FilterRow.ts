@@ -1,5 +1,6 @@
 import { Menu } from 'obsidian'
 import type { Project, FilterState, StatusConfig, PriorityConfig, DueDateFilter } from '../../../types'
+import type { StatusFilterGroup } from '../../../store/AllProjectsAggregate'
 import { collectAllAssignees, collectAllTags } from '../../../store'
 import { countActiveFilters } from '../../../store/TaskFilter'
 import { renderFilterDropdown } from '../../FilterDropdown'
@@ -12,6 +13,8 @@ export interface FilterRowProps {
   priorities: PriorityConfig[]
   /** Owner-project filter options; present only in the "All Projects" aggregate. */
   projectOptions?: { id: string; label: string }[]
+  /** Label-grouped status chips; present only in the "All Projects" aggregate. */
+  statusFilterGroups?: StatusFilterGroup[]
   filter: FilterState
   onFilterChange: () => void
   onClear: () => void
@@ -46,16 +49,23 @@ export class FilterRow {
       this.updateClearButton()
     }
 
-    renderFilterDropdown(
-      this.el,
-      'Status',
-      filter.statuses,
-      statuses.map((s) => ({ id: s.id, label: formatBadgeText(s.icon, s.label) })),
-      (selected) => {
-        filter.statuses = selected
-        notify()
-      }
-    )
+    if (this.props.statusFilterGroups?.length) {
+      // Aggregate: one chip per distinct status LABEL. Selecting "Done" toggles
+      // every project-scoped id that resolves to "Done", so matching stays a
+      // plain id membership test while the user sees a single, deduped label.
+      this.renderGroupedStatusDropdown(this.props.statusFilterGroups, notify)
+    } else {
+      renderFilterDropdown(
+        this.el,
+        'Status',
+        filter.statuses,
+        statuses.map((s) => ({ id: s.id, label: formatBadgeText(s.icon, s.label) })),
+        (selected) => {
+          filter.statuses = selected
+          notify()
+        }
+      )
+    }
 
     renderFilterDropdown(
       this.el,
@@ -106,6 +116,51 @@ export class FilterRow {
     this.renderDueDateButton(notify)
     this.renderArchivedButton(notify)
     this.renderClearButton()
+  }
+
+  private renderGroupedStatusDropdown(groups: StatusFilterGroup[], notify: () => void): void {
+    const { filter } = this.props
+    const selected = new Set(filter.statuses)
+    const isOn = (g: StatusFilterGroup) => g.ids.some((id) => selected.has(id))
+    const btn = new ChipButton(this.el).setAriaLabel('Filter by Status')
+    const updateLabel = () => {
+      const count = groups.filter(isOn).length
+      btn.setLabel(count > 0 ? `Status: ${count}` : 'Status').setActive(count > 0)
+    }
+    updateLabel()
+    btn.onClick((e) => {
+      const menu = new Menu()
+      for (const g of groups) {
+        menu.addItem((item) =>
+          item
+            .setTitle(g.display)
+            .setChecked(isOn(g))
+            .onClick(() => {
+              const turningOff = isOn(g)
+              for (const id of g.ids) {
+                if (turningOff) selected.delete(id)
+                else selected.add(id)
+              }
+              filter.statuses = [...selected]
+              updateLabel()
+              notify()
+            })
+        )
+      }
+      if (groups.some(isOn)) {
+        menu.addSeparator()
+        menu.addItem((item) =>
+          item.setTitle('Clear').onClick(() => {
+            for (const g of groups) for (const id of g.ids) selected.delete(id)
+            filter.statuses = [...selected]
+            updateLabel()
+            notify()
+          })
+        )
+      }
+      menu.showAtMouseEvent(e)
+    })
+    btn.el.setAttribute('role', 'combobox')
   }
 
   private renderDueDateButton(notify: () => void): void {
