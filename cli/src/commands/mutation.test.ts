@@ -100,7 +100,10 @@ describe('shift cascade suppression (--no-cascade / --no-schedule)', () => {
     const b = await seedTask(vault, proj, 'B')
     await run(vault, ['set', a.id, 'due=2026-08-01'])
     await run(vault, ['set', sub.id, 'due=2026-08-01'])
-    await run(vault, ['set', b.id, 'due=2026-08-02'])
+    // `start` must be set explicitly: `makeTask` auto-stamps start=today (well
+    // after the fixture due dates), and a dependent whose start already sits
+    // past its predecessor's due is correctly NOT rescheduled by the scheduler.
+    await run(vault, ['set', b.id, 'start=2026-08-02', 'due=2026-08-02'])
     // Wire the dependency WITHOUT triggering the scheduler, so B stays at 2026-08-02
     // until the shift-under-test decides whether to reschedule it. (Also exercises
     // --no-schedule on `depend`.)
