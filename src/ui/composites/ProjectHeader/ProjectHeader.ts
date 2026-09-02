@@ -1,4 +1,5 @@
 import type { Project, FilterState, StatusConfig, PriorityConfig } from '../../../types'
+import type { StatusFilterGroup } from '../../../store/AllProjectsAggregate'
 import { isFilterActive } from '../../../store/TaskFilter'
 import { PrimaryRow } from './PrimaryRow'
 import { FilterRow } from './FilterRow'
@@ -9,6 +10,8 @@ export interface ProjectHeaderProps {
   priorities: PriorityConfig[]
   /** Owner-project filter options; present only in the "All Projects" aggregate. */
   projectOptions?: { id: string; label: string }[]
+  /** Label-grouped status filter chips; present only in the "All Projects" aggregate. */
+  statusFilterGroups?: StatusFilterGroup[]
   filter: FilterState
   activeSavedViewId: string | null
   onFilterChange: () => void
@@ -90,6 +93,7 @@ export class ProjectHeader {
       statuses: this.props.statuses,
       priorities: this.props.priorities,
       projectOptions: this.props.projectOptions,
+      statusFilterGroups: this.props.statusFilterGroups,
       filter: this.props.filter,
       onFilterChange: this.props.onFilterChange,
       onClear: this.props.onClearFilter

@@ -87,6 +87,14 @@ export interface Project {
   config?: ProjectConfig
   /** Transient id → {task, parentId} index. Rebuilt on load, maintained by store mutators. Not serialized. */
   taskIndex: TaskIndex
+  /**
+   * Transient per-owner status palettes, set ONLY on the synthetic "All Projects"
+   * aggregate (see store/AllProjectsAggregate). Maps each real project's id to its
+   * fully resolved statuses so a task renders and edits with ITS OWN project's
+   * statuses — real labels, colours and `complete` flags — instead of the merged
+   * union. Absent in every single-project view; never serialized.
+   */
+  aggregateOwnerStatuses?: Map<string, StatusConfig[]>
 }
 
 export interface FilterState {
