@@ -1,4 +1,3 @@
-import { today } from './dates'
 import type { TaskIndex } from './store/TaskIndex'
 
 export type TaskStatus = string
@@ -272,7 +271,15 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     type: 'task',
     status: 'todo',
     priority: 'medium',
-    start: today().toString(),
+    // Leave `start` empty unless explicitly provided. A created task with only a
+    // `due` must stay schedulable: computeSchedule treats `start && due` as a
+    // fixed span it will only shift FORWARD (start >= earliestStart → no move),
+    // so an auto-stamped start=today made every due-only task silently
+    // immovable. The scheduler's `!start && due` branch (due shifts forward as a
+    // milestone) is the correct default; gantt and pickers already fall back to
+    // gantt and pickers already fall back to
+    // due when start is empty.
+    start: '',
     due: '',
     progress: 0,
     completed: '',
