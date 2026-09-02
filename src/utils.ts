@@ -1,7 +1,6 @@
 import { Notice, setIcon } from 'obsidian'
 import type { Task, StatusConfig, PriorityConfig, TaskPriority } from './types'
 import { today, parsePlainDate, Temporal } from './dates'
-
 /** Deterministic HSL color from a string (e.g. assignee name) */
 export function stringToColor(s: string): string {
   let hash = 0
@@ -9,18 +8,18 @@ export function stringToColor(s: string): string {
   return `hsl(${Math.abs(hash) % 360}, 55%, 45%)`
 }
 
-/** Short date: "Mar 28" */
+/** Short date: "Mar 28". Parsed as a PlainDate so a bare YYYY-MM-DD renders
+ *  as the same calendar day in every timezone (a `new Date(iso)` UTC-midnight
+ *  parse shifted the label a day back for users west of UTC). */
 export function formatDateShort(iso: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const d = parsePlainDate(iso)
+  return d ? d.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : ''
 }
 
-/** Long date: "Mar 28, '26" */
+/** Long date: "Mar 28, '26" — timezone-independent, like {@link formatDateShort}. */
 export function formatDateLong(iso: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })
+  const d = parsePlainDate(iso)
+  return d ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: '2-digit' }) : ''
 }
 
 /** Is a status marked as terminal (complete) in the config? */

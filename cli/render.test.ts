@@ -119,7 +119,10 @@ async function seed(vault: string): Promise<Fixture> {
 
   const logo = id(await run(vault, ['new', 'task', '--project', projA, '--title', 'Design logo', '--due', '2026-07-12']))
   const schema = id(await run(vault, ['new', 'task', '--project', projA, '--title', 'DB schema', '--due', '2026-07-18']))
-  const qa = id(await run(vault, ['new', 'task', '--project', projA, '--title', 'QA pass', '--due', '2026-07-19']))
+  const qa = id(await run(vault, ['new', 'task', '--project', projA, '--title', 'QA pass', '--start', '2026-07-18', '--due', '2026-07-19']))
+  // qa's `start` is set explicitly: `makeTask` auto-stamps start=today, and a
+  // dependent whose start (Sept) already sits past its predecessor's due (July)
+  // is correctly NOT rescheduled — so the ⚠ cascade warning would never fire.
   await run(vault, ['depend', qa, '--on', schema])
 
   const projB = id(await run(vault, ['new', 'project', '--title', 'Community Garden', '--dir', 'Personal']))
