@@ -25,13 +25,6 @@ describe('date formatters are timezone-independent (bug kzniwt6lmtj9c2bp)', () =
     expect(out).not.toMatch(/Aug/)
   })
 
-  it('agrees with the dates.ts Temporal formatter for the same input', () => {
-    // The edit-mode date input shows the raw YYYY-MM-DD; the display chip must
-    // decode to the same calendar day.
-    expect(formatDateLong('2026-09-01')).toMatch(/1/)
-    expect(formatDateShort('2026-12-31')).toMatch(/Dec/)
-  })
-
   it('returns empty string for empty and invalid input', () => {
     expect(formatDateShort('')).toBe('')
     expect(formatDateLong('')).toBe('')

@@ -271,14 +271,9 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     type: 'task',
     status: 'todo',
     priority: 'medium',
-    // Leave `start` empty unless explicitly provided. A created task with only a
-    // `due` must stay schedulable: computeSchedule treats `start && due` as a
-    // fixed span it will only shift FORWARD (start >= earliestStart → no move),
-    // so an auto-stamped start=today made every due-only task silently
-    // immovable. The scheduler's `!start && due` branch (due shifts forward as a
-    // milestone) is the correct default; gantt and pickers already fall back to
-    // gantt and pickers already fall back to
-    // due when start is empty.
+    // Empty unless explicitly set: the scheduler only shifts a start&&due span
+    // forward, so a stamped start would make a due-only task unschedulable.
+    // Consumers treat '' as unset (gantt falls back to due).
     start: '',
     due: '',
     progress: 0,

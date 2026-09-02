@@ -17,10 +17,25 @@ export function parsePlainDate(s: string): Temporal.PlainDate | null {
   }
 }
 
+/** The shared rendering policy for plain-date fields: parse, then format locally; '' when empty/invalid. */
+function formatPlainDate(iso: string, options: Intl.DateTimeFormatOptions): string {
+  const d = parsePlainDate(iso)
+  return d ? d.toLocaleString(undefined, options) : ''
+}
+
 /** Format a YYYY-MM-DD field as a short local date (e.g. "Jun 15, 2026"); '' when empty/invalid. */
 export function formatDate(iso: string): string {
-  const d = parsePlainDate(iso)
-  return d ? d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''
+  return formatPlainDate(iso, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+/** Format a YYYY-MM-DD field without the year (e.g. "Jun 15"); '' when empty/invalid. */
+export function formatDateShort(iso: string): string {
+  return formatPlainDate(iso, { month: 'short', day: 'numeric' })
+}
+
+/** Format a YYYY-MM-DD field with a 2-digit year (e.g. "Jun 15, 26"); '' when empty/invalid. */
+export function formatDateLong(iso: string): string {
+  return formatPlainDate(iso, { month: 'short', day: 'numeric', year: '2-digit' })
 }
 
 export type DueTone = 'overdue' | 'today' | 'soon'
