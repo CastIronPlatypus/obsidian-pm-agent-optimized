@@ -69,6 +69,11 @@ export class TaskModal extends Modal {
     contentEl.empty()
     contentEl.addClass('pm-task-modal')
     this.modalEl.addClass('pm-modal', 'pm-modal--task')
+    // Hide Obsidian's native close button so only our custom one shows.
+    // CSS display:none may lose to Obsidian's internal styles, so we also
+    // hide it imperatively here.
+    const nativeClose = this.modalEl.querySelector('.modal-close-button') as HTMLElement | null
+    if (nativeClose) nativeClose.style.display = 'none'
     this.render()
   }
 

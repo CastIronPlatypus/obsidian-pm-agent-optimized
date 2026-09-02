@@ -5,3 +5,5 @@ CLAUDE.md
 DESIGN.md
 .DS_Store
 dekspec/.scratch/
+.freebuff/
+debug-*.yaml
